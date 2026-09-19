@@ -175,6 +175,77 @@ def diarizar_segmentos(segmentos_whisper: list, audio_np: np.ndarray = None,
     return resultado
 
 
+def ajustar_tiempos_precisos(seg: dict, audio_np: np.ndarray = None, sample_rate: int = 16000, es_primer_segmento: bool = False) -> tuple:
+    """
+    Ajusta los tiempos de inicio y fin para que los subtítulos aparezcan
+    exactamente cuando la persona habla y se oculten al terminar.
+    """
+    orig_start = float(seg.get("start", 0.0))
+    orig_end = float(seg.get("end", 0.0))
+    start_s = orig_start
+    end_s = orig_end
+
+    # 1. Utilizar timestamps a nivel de palabra si Whisper los produjo
+    words = seg.get("words")
+    if words and len(words) > 0:
+        first_word = words[0]
+        last_word = words[-1]
+        w_start = float(first_word.get("start", start_s))
+        w_end = float(last_word.get("end", end_s))
+
+        # En el primer diálogo o cuando el inicio fonético real está desplazado
+        if w_start > start_s:
+            # Empezar 50ms antes de la primera palabra para no cortar el primer fonema
+            start_s = max(orig_start, w_start - 0.05)
+
+        if w_end < end_s:
+            # Terminar 150ms después de la última palabra para una lectura natural y sincronizada
+            end_s = min(orig_end, w_end + 0.15)
+
+    # 2. Refinamiento acústico por VAD (detección de energía vocal) sobre el audio real
+    if audio_np is not None and len(audio_np) > 0:
+        chunk_start = max(0, int(orig_start * sample_rate))
+        chunk_end = min(len(audio_np), int(orig_end * sample_rate))
+        chunk = audio_np[chunk_start:chunk_end]
+
+        frame_len = int(sample_rate * 0.025) # 25ms
+        hop_len = int(sample_rate * 0.010)   # 10ms
+
+        if len(chunk) > frame_len * 2:
+            n_frames = (len(chunk) - frame_len) // hop_len
+            piso_muestras = chunk[:min(len(chunk), int(sample_rate * 0.10))]
+            ruido_base = float(np.sqrt(np.mean(piso_muestras ** 2))) if len(piso_muestras) > 0 else 0.001
+            umbral_voz = max(0.006, ruido_base * 2.2)
+
+            # Buscar inicio real de voz hacia adelante
+            max_frames_inicio = min(n_frames, int(sample_rate * 4.0 / hop_len))
+            for f in range(max_frames_inicio):
+                idx = f * hop_len
+                rms = float(np.sqrt(np.mean(chunk[idx:idx + frame_len] ** 2)))
+                if rms > umbral_voz:
+                    t_voz = orig_start + (idx / sample_rate)
+                    if t_voz - start_s > 0.10:
+                        start_s = max(start_s, t_voz - 0.05)
+                    break
+
+            # Buscar fin real de voz hacia atrás
+            max_frames_fin = min(n_frames, int(sample_rate * 3.0 / hop_len))
+            for f in range(n_frames - 1, max(0, n_frames - max_frames_fin), -1):
+                idx = f * hop_len
+                rms = float(np.sqrt(np.mean(chunk[idx:idx + frame_len] ** 2)))
+                if rms > umbral_voz:
+                    t_fin_voz = orig_start + ((idx + frame_len) / sample_rate)
+                    if end_s - t_fin_voz > 0.15:
+                        end_s = min(end_s, t_fin_voz + 0.12)
+                    break
+
+    # Asegurar orden cronológico coherente
+    if end_s <= start_s:
+        end_s = start_s + 0.5
+
+    return round(start_s, 3), round(end_s, 3)
+
+
 def transcribir(file_path: str, model_name: str, language: str, num_speakers: int) -> dict:
     """Carga Whisper, transcribe y aplica diarizacion. Retorna dict ResultadoWhisper."""
     import whisper
@@ -185,7 +256,7 @@ def transcribir(file_path: str, model_name: str, language: str, num_speakers: in
     print(f"[whisper_runner] Cargando modelo: {resolved_model}", file=sys.stderr)
     model = whisper.load_model(resolved_model)
 
-    kwargs = {"word_timestamps": False, "verbose": None}
+    kwargs = {"word_timestamps": True, "verbose": None}
     if language and language.lower() not in ("auto", ""):
         kwargs["language"] = language
 
@@ -216,13 +287,19 @@ def transcribir(file_path: str, model_name: str, language: str, num_speakers: in
 
     output_segments = []
     for i, seg in enumerate(diarized):
+        start_ajustado, end_ajustado = ajustar_tiempos_precisos(
+            seg,
+            audio_np=audio_np,
+            sample_rate=16000,
+            es_primer_segmento=(i == 0)
+        )
         avg_logprob = seg.get("avg_logprob", -0.1)
         confidence = round(min(1.0, max(0.0, 1.0 + avg_logprob / 5.0)), 3)
         output_segments.append({
             "id": f"seg_{i + 1}",
             "speakerId": seg["speakerId"],
-            "startTime": round(seg["start"], 3),
-            "endTime": round(seg["end"], 3),
+            "startTime": start_ajustado,
+            "endTime": end_ajustado,
             "text": seg["text"].strip(),
             "confidence": confidence,
         })
