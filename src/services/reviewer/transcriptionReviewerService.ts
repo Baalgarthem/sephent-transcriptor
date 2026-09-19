@@ -195,7 +195,7 @@ export class TranscriptionReviewerService {
       return {
         ...b,
         reviewedText: nuevoTexto,
-        corrections,
+        corrections: correcciones,
       };
     });
 
@@ -240,7 +240,7 @@ export class TranscriptionReviewerService {
       return {
         ...b,
         reviewedText: nuevoTexto,
-        corrections,
+        corrections: correcciones,
       };
     });
 
@@ -294,7 +294,7 @@ export class TranscriptionReviewerService {
       return {
         ...b,
         reviewedText: nuevoTexto,
-        corrections,
+        corrections: correcciones,
       };
     });
 
@@ -355,6 +355,7 @@ export class TranscriptionReviewerService {
       durationSeconds,
       reviewedText,
       originalText,
+      confidence: primerBloque.confidence || 0.95,
       wasMerged: true,
       mergeReason: 'Fusión manual interactiva solicitada por el usuario',
       originalSegments: combinedOriginalSegments,

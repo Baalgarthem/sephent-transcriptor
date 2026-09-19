@@ -76,6 +76,28 @@ export class ModelManager {
   }
 
   /**
+   * Establece explícitamente el modelo activo del sistema
+   */
+  public static setModeloActivo(modeloId: string): void {
+    this.registrarUltimoModeloUtilizado(modeloId);
+  }
+
+  /**
+   * Comprueba si un modelo está activo y disponible localmente en la ruta oficial
+   */
+  public static isModelActive(modeloId: string): boolean {
+    const descargados = this.obtenerModelosDescargados();
+    return descargados.some((m) => m.id === modeloId && m.estaDisponible);
+  }
+
+  /**
+   * Alias en español para isModelActive
+   */
+  public static esModeloActivo(modeloId: string): boolean {
+    return this.isModelActive(modeloId);
+  }
+
+  /**
    * Obtiene la lista de modelos actualmente descargados y disponibles en la ruta oficial
    */
   public static obtenerModelosDescargados(): ModeloInstaladoInfo[] {
@@ -225,6 +247,9 @@ export class ModelManager {
     try {
       const rawJson = await invoke<string>('auditar_modelos');
       const resultado = typeof rawJson === 'string' ? JSON.parse(rawJson) : rawJson;
+      if (resultado && resultado.rutaOficial) {
+        WhisperPathService.actualizarRutaDetectada(resultado.rutaOficial);
+      }
       if (resultado && Array.isArray(resultado.modelos)) {
         for (const m of resultado.modelos) {
           if (m.estaDisponible) {
@@ -504,25 +529,6 @@ export class ModelManager {
    */
   public static listAvailableModels(): string[] {
     return Object.keys(WHISPER_MODELS);
-  }
-
-  /**
-   * Consulta si un modelo está activo / disponible localmente
-   */
-  public static isModelActive(modeloId: string): boolean {
-    const modelos = this.revisarModelosEnRutaOficial();
-    const encontrado = modelos.find((m) => m.id === modeloId);
-    return Boolean(encontrado?.estaDisponible);
-  }
-
-  /**
-   * Establece el modelo seleccionado por el usuario y lo persiste como último utilizado
-   */
-  public static setModeloActivo(modeloId: string): void {
-    if (WHISPER_MODELS[modeloId]) {
-      this.modeloActivoId = modeloId;
-      this.registrarUltimoModeloUtilizado(modeloId);
-    }
   }
 
   /**

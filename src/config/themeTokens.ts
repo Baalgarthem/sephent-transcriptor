@@ -26,6 +26,8 @@ export const THEME_TOKENS = {
 
     accentPrimary: '#242320',
     accentHover: '#383733',
+    accentDark: '#1C1C1A',
+    accentGold: '#92400e',
     accentTaupe: '#B5A795',
     accentTaupeBg: '#F7F5F0',
 
@@ -58,6 +60,7 @@ export const THEME_TOKENS = {
     pill: '9999px',
   },
   shadows: {
+    xs: '0 1px 1px rgba(20, 20, 18, 0.03)',
     sm: '0 1px 2px rgba(20, 20, 18, 0.04)',
     md: '0 4px 12px rgba(20, 20, 18, 0.06)',
     lg: '0 16px 32px -8px rgba(20, 20, 18, 0.12)',

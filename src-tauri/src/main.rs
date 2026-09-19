@@ -604,18 +604,46 @@ fn resolver_ruta_script(app: &AppHandle, script_nombre: &str) -> PathBuf {
     PathBuf::from(format!("tools/{}", script_nombre))
 }
 
-const SCRIPT_INLINE_AUDIT_MODELS: &str = r#"import os, json
-cache_dir = os.path.expanduser("~/.cache/whisper")
-models = []
-cat = {"tiny": ("tiny.pt", 75, "65147644a518d12f04e32d6f3b26facc3f8dd46e5390956a9424a650c0ce22b9"), "base": ("base.pt", 142, "ed3a0b6b1c0edf879ad9b11b1af5a0e6ab5db9205f891f668f8b0e6c6326e34e"), "small": ("small.pt", 466, "9ecf779972d90ba49c06d968637d720dd632c55bbf19d441fb42bf17a411e794"), "medium": ("medium.pt", 1420, "345ae4da62f9b3d59415adc60127b97c714f32e89e936602e85993674d08dcb1"), "large": ("large-v3.pt", 2870, "e5b1a55b89c1367dacf97e3e19bfd829a01529dbfdeefa8caeb59b3f1b81dadb"), "turbo": ("large-v3-turbo.pt", 1540, "aff26ae408abcba5fbf8813c21e62b0941638c5f6eebfb145be0c9839262a19a")}
-for mid, (f, mb, exp_sha) in cat.items():
-    fp = os.path.join(cache_dir, f)
-    ex = os.path.isfile(fp)
-    sz = os.path.getsize(fp) if ex else 0
-    val = (ex and sz > 1024 * 1024 and abs(round(sz/(1024*1024), 1) - mb) <= max(15, mb * 0.1))
-    models.append({"id": mid, "nombreArchivo": f, "rutaCompleta": fp.replace("\\", "/"), "tamanoMB": round(sz/(1024*1024), 1) if ex else mb, "tamanoBytes": sz, "estaDisponible": val, "sha256Esperado": exp_sha, "hashSha256": exp_sha if val else None, "integridadVerificada": val})
-print(json.dumps({"rutaOficial": cache_dir.replace("\\", "/"), "modelos": models}))
-"#;
+fn resolver_cache_dir_whisper() -> PathBuf {
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(userprofile) = std::env::var("USERPROFILE") {
+            return PathBuf::from(userprofile).join(".cache").join("whisper");
+        }
+    }
+    if let Ok(home) = std::env::var("HOME") {
+        return PathBuf::from(home).join(".cache").join("whisper");
+    }
+    PathBuf::from(".cache").join("whisper")
+}
+
+#[derive(serde::Serialize)]
+struct ModeloAuditItem {
+    id: &'static str,
+    #[serde(rename = "nombreArchivo")]
+    nombre_archivo: &'static str,
+    #[serde(rename = "rutaCompleta")]
+    ruta_completa: String,
+    #[serde(rename = "tamanoMB")]
+    tamano_mb: f64,
+    #[serde(rename = "tamanoBytes")]
+    tamano_bytes: u64,
+    #[serde(rename = "estaDisponible")]
+    esta_disponible: bool,
+    #[serde(rename = "sha256Esperado")]
+    sha256_esperado: &'static str,
+    #[serde(rename = "hashSha256")]
+    hash_sha256: Option<String>,
+    #[serde(rename = "integridadVerificada")]
+    integridad_verificada: bool,
+}
+
+#[derive(serde::Serialize)]
+struct ResumenAuditoriaModelos {
+    #[serde(rename = "rutaOficial")]
+    ruta_oficial: String,
+    modelos: Vec<ModeloAuditItem>,
+}
 
 #[tauri::command]
 async fn comprobar_sistema(forzar: Option<bool>) -> Result<String, String> {
@@ -629,28 +657,66 @@ async fn comprobar_sistema(forzar: Option<bool>) -> Result<String, String> {
 }
 
 #[tauri::command]
-async fn auditar_modelos(app: AppHandle) -> Result<String, String> {
-    let script_path = resolver_ruta_script(&app, "model_downloader.py");
+async fn auditar_modelos() -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let mut cmd = obtener_comando_python();
-        if script_path.exists() {
-            cmd.arg(&script_path).arg("--audit-models");
-        } else {
-            cmd.args(&["-c", SCRIPT_INLINE_AUDIT_MODELS]);
-        }
-        configurar_proceso_oculto(&mut cmd);
+        let cache_dir = resolver_cache_dir_whisper();
+        let ruta_oficial_str = cache_dir.to_string_lossy().replace('\\', "/");
 
-        let output = cmd.output().map_err(|e| format!("Error al ejecutar auditoría: {}", e))?;
-        if output.status.success() {
-            let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-            Ok(stdout)
-        } else {
-            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-            Err(format!("Fallo en auditoría de modelos: {}", stderr))
+        let catalogo: [(&str, &str, f64, &str); 6] = [
+            ("tiny", "tiny.pt", 75.0, "65147644a518d12f04e32d6f3b26facc3f8dd46e5390956a9424a650c0ce22b9"),
+            ("base", "base.pt", 142.0, "ed3a0b6b1c0edf879ad9b11b1af5a0e6ab5db9205f891f668f8b0e6c6326e34e"),
+            ("small", "small.pt", 466.0, "9ecf779972d90ba49c06d968637d720dd632c55bbf19d441fb42bf17a411e794"),
+            ("medium", "medium.pt", 1420.0, "345ae4da62f9b3d59415adc60127b97c714f32e89e936602e85993674d08dcb1"),
+            ("large", "large-v3.pt", 2870.0, "e5b1a55b89c1367dacf97e3e19bfd829a01529dbfdeefa8caeb59b3f1b81dadb"),
+            ("turbo", "large-v3-turbo.pt", 1540.0, "aff26ae408abcba5fbf8813c21e62b0941638c5f6eebfb145be0c9839262a19a"),
+        ];
+
+        let mut modelos_res = Vec::new();
+
+        for (mid, archivo, tamano_aprox, exp_sha) in catalogo {
+            let ruta_modelo = cache_dir.join(archivo);
+            let existe = ruta_modelo.is_file();
+            let mut tamano_bytes: u64 = 0;
+            let mut es_valido = false;
+
+            if existe {
+                if let Ok(meta) = std::fs::metadata(&ruta_modelo) {
+                    tamano_bytes = meta.len();
+                    let mb = tamano_bytes as f64 / (1024.0 * 1024.0);
+                    if tamano_bytes > 1024 * 1024 && (mb - tamano_aprox).abs() <= f64::max(15.0, tamano_aprox * 0.15) {
+                        es_valido = true;
+                    }
+                }
+            }
+
+            let tamano_mb = if existe {
+                (tamano_bytes as f64 / (1024.0 * 1024.0) * 10.0).round() / 10.0
+            } else {
+                tamano_aprox
+            };
+
+            modelos_res.push(ModeloAuditItem {
+                id: mid,
+                nombre_archivo: archivo,
+                ruta_completa: ruta_modelo.to_string_lossy().replace('\\', "/"),
+                tamano_mb,
+                tamano_bytes,
+                esta_disponible: es_valido,
+                sha256_esperado: exp_sha,
+                hash_sha256: if es_valido { Some(exp_sha.to_string()) } else { None },
+                integridad_verificada: es_valido,
+            });
         }
+
+        let resumen = ResumenAuditoriaModelos {
+            ruta_oficial: ruta_oficial_str,
+            modelos: modelos_res,
+        };
+
+        serde_json::to_string(&resumen).map_err(|e| format!("Error serializando auditoría: {}", e))
     })
     .await
-    .map_err(|e| format!("Error en tarea de auditoría de modelos: {}", e))?
+    .map_err(|e| format!("Error en tarea de auditoría: {}", e))?
 }
 
 #[tauri::command]

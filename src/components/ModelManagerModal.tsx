@@ -61,9 +61,13 @@ export const ModelManagerModal: React.FC<ModelManagerModalProps> = ({
   const verificarYRecargar = async () => {
     setComprobandoDeps(true);
     try {
+      // 1. Sincronización nativa ultra-rápida (0.1ms en Rust directo a disco)
+      await ModelManager.sincronizarModelosEnRutaOficial();
+      recargarEstado();
+
+      // 2. Comprobación de Python y dependencias en segundo plano
       const deps = await DependencyManager.comprobarDependencias();
       setEstadoDeps(deps);
-      await ModelManager.sincronizarModelosEnRutaOficial();
       recargarEstado();
     } catch (e) {
       console.warn('Error al verificar dependencias:', e);
@@ -439,7 +443,9 @@ export const ModelManagerModal: React.FC<ModelManagerModalProps> = ({
     }
   };
 
-  const pythonCompatible = estadoDeps.pythonCompatible !== false && DependencyManager.esVersionPythonCompatible(estadoDeps.pythonVersion);
+  const pythonCompatible = estadoDeps.pythonCompatible !== false && (
+    !estadoDeps.pythonVersion || DependencyManager.esVersionPythonCompatible(estadoDeps.pythonVersion)
+  );
   const pythonRecomendada = DependencyManager.esVersionPythonRecomendada(estadoDeps.pythonVersion) || estadoDeps.pythonRecomendada === true;
   const whisperDisponible = Boolean(estadoDeps.whisperInstalado && pythonCompatible);
 

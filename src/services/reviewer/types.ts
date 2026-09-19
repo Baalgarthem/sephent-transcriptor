@@ -29,6 +29,7 @@ export type CorrectionStatus = 'applied' | 'pending_review' | 'rejected' | 'user
 
 export interface CorrectionTrace {
   readonly id: string;
+  tokenIndex?: number;
   readonly originalWord: string;
   suggestedWord: string;
   type: CorrectionType;
@@ -63,6 +64,7 @@ export interface ReviewedSegmentBlock {
   speakerName: string;        // Nombre visible dinámico
   startTime: number;          // Timestamp inicial del primer fragmento
   endTime: number;            // Timestamp final del último fragmento
+  durationSeconds?: number;   // Duración en segundos
   readonly originalSegments: readonly RawTranscriptSegment[]; // Providencia y trazabilidad probatoria
   readonly originalText: string;
   reviewedText: string;

@@ -71,6 +71,19 @@ export class WhisperPathService {
     // 2. Detección de entorno y plataforma
     const so = this.detectarSistemaOperativo();
 
+    const rutaDetectada = this.obtenerItemSeguro('sephent_whisper_detected_cache_path');
+    if (rutaDetectada && rutaDetectada.trim().length > 0) {
+      const rutaNorm = rutaDetectada.trim().replace(/\//g, '\\');
+      return {
+        sistemaOperativoDetectado: so,
+        rutaPorDefectoOficial: rutaNorm,
+        rutaPorDefectoFormatoAmigable: `%USERPROFILE%\\.cache\\whisper (${rutaNorm})`,
+        existeDirectorio: true,
+        esRutaPersonalizada: false,
+        origenDeteccion: 'estandar-windows',
+      };
+    }
+
     if (so === 'windows') {
       // Formato oficial estándar en Windows
       const nombreUsuario = this.obtenerNombreUsuarioEstimado();
@@ -119,6 +132,15 @@ export class WhisperPathService {
       this.guardarItemSeguro(this.claveRutaPersonalizada, nuevaRuta.trim());
     } else {
       this.guardarItemSeguro(this.claveRutaPersonalizada, null);
+    }
+  }
+
+  /**
+   * Guarda la ruta real detectada por el backend nativo (Tauri Rust)
+   */
+  public static actualizarRutaDetectada(ruta: string): void {
+    if (ruta && ruta.trim().length > 0) {
+      this.guardarItemSeguro('sephent_whisper_detected_cache_path', ruta.trim());
     }
   }
 

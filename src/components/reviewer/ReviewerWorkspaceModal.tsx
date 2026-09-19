@@ -763,7 +763,7 @@ export const ReviewerWorkspaceModal: React.FC<ReviewerWorkspaceModalProps> = ({
                   TranscriptionGroupService.limpiarTodo();
                   setDossier(null);
                   recargarDatosBase();
-                  if (alGuardarHablantes) alGuardarHablantes({});
+                  if (alGuardarHablantes) alGuardarHablantes({ speakerNames: {} });
                   mostrarMensaje('🧹 Todos los datos han sido eliminados. El sistema está en cero.', 'exito');
                 }
               }}

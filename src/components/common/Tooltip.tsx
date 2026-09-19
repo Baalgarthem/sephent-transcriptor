@@ -2,7 +2,8 @@ import React, { useState } from 'react';
 import { THEME_TOKENS } from '../../config/themeTokens';
 
 interface HoverTooltipProps {
-  content: string | React.ReactNode;
+  content?: string | React.ReactNode;
+  text?: string;
   children: React.ReactNode;
   position?: 'top' | 'bottom' | 'left' | 'right';
   maxWidth?: string;
@@ -11,11 +12,13 @@ interface HoverTooltipProps {
 
 export const HoverTooltip: React.FC<HoverTooltipProps> = ({
   content,
+  text,
   children,
   position = 'top',
   maxWidth = '260px',
   delayMs = 150,
 }) => {
+  const displayContent = content || text;
   const [visible, setVisible] = useState(false);
   const [timer, setTimer] = useState<any>(null);
 
@@ -93,7 +96,7 @@ export const HoverTooltip: React.FC<HoverTooltipProps> = ({
             ...positionStyle,
           }}
         >
-          {content}
+          {displayContent}
         </div>
       )}
     </div>
