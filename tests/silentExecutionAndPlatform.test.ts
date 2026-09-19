@@ -6,6 +6,7 @@
 import { PlatformService } from '../src/services/platform/platformService';
 import { SilentProcessGuard } from '../src/services/platform/silentProcessGuard';
 import { WhisperPathService } from '../src/services/whisperPathService';
+import { DependencyManager } from '../src/services/dependencyManager';
 
 async function ejecutarPruebasSilenciosasYPlataforma() {
   console.log('========================================================');
@@ -93,6 +94,30 @@ async function ejecutarPruebasSilenciosasYPlataforma() {
   afirmar(!!rutaPorDefecto.sistemaOperativoDetectado, `Sistema detectado: ${rutaPorDefecto.sistemaOperativoDetectado}`);
   afirmar(rutaPorDefecto.rutaPorDefectoOficial.length > 0, 'Ruta oficial calculada');
   afirmar(rutaPorDefecto.existeDirectorio === true, 'Indica disponibilidad de directorio');
+
+  // 7. Validación de Versiones Compatibles y Óptimas de Python para OpenAI Whisper
+  console.log('\n🐍 7. Validación de Rango de Compatibilidad y Versión Óptima de Python...');
+  // Versiones compatibles (3.8 a 3.13)
+  afirmar(DependencyManager.esVersionPythonCompatible('3.11.9') === true, 'Python 3.11.9 es compatible con OpenAI Whisper');
+  afirmar(DependencyManager.esVersionPythonCompatible('3.12.8') === true, 'Python 3.12.8 es compatible con OpenAI Whisper');
+  afirmar(DependencyManager.esVersionPythonCompatible('3.8.10') === true, 'Python 3.8.10 es compatible (mínimo soportado)');
+  afirmar(DependencyManager.esVersionPythonCompatible('3.9.13') === true, 'Python 3.9.13 es compatible');
+  afirmar(DependencyManager.esVersionPythonCompatible('3.10.11') === true, 'Python 3.10.11 es compatible');
+  afirmar(DependencyManager.esVersionPythonCompatible('3.13.2') === true, 'Python 3.13.2 es compatible (máximo soportado)');
+
+  // Versiones incompatibles (fuera del soporte oficial de dependencias PyTorch/Numba/NumPy/TikToken)
+  afirmar(DependencyManager.esVersionPythonCompatible('3.14.0') === false, 'Python 3.14.0 es incompatible (sin wheels estables de torch/numba)');
+  afirmar(DependencyManager.esVersionPythonCompatible('3.15.0') === false, 'Python 3.15.0 es incompatible');
+  afirmar(DependencyManager.esVersionPythonCompatible('3.7.9') === false, 'Python 3.7.9 es incompatible (< 3.8)');
+  afirmar(DependencyManager.esVersionPythonCompatible('2.7.18') === false, 'Python 2.7.18 es incompatible');
+  afirmar(DependencyManager.esVersionPythonCompatible(undefined) === false, 'Versión indefinida es incompatible');
+
+  // Versiones óptimas recomendadas (3.11 y 3.12)
+  afirmar(DependencyManager.esVersionPythonRecomendada('3.11.0') === true, 'Python 3.11 es versión recomendada óptima');
+  afirmar(DependencyManager.esVersionPythonRecomendada('3.12.5') === true, 'Python 3.12 es versión recomendada óptima');
+  afirmar(DependencyManager.esVersionPythonRecomendada('3.10.9') === false, 'Python 3.10 no es la óptima recomendada');
+  afirmar(DependencyManager.esVersionPythonRecomendada('3.13.1') === false, 'Python 3.13 no es la óptima recomendada');
+  afirmar(DependencyManager.esVersionPythonRecomendada('3.14.0') === false, 'Python 3.14 no es recomendada');
 
   console.log('\n========================================================');
   console.log(`🎉 RESULTADOS: ${superadas} de ${totales} pruebas superadas exitosamente (100%).`);

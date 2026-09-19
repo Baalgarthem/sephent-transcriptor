@@ -16,7 +16,10 @@ export interface EstadoDependenciasSistema {
   pythonVersion?: string;
   pythonRuta?: string;
   pythonCompatible?: boolean;
+  pythonRecomendada?: boolean;
   pythonMinVersion?: string;
+  pythonMaxVersion?: string;
+  pythonVersionRecomendada?: string;
   errorCompatibilidad?: string;
   whisperInstalado: boolean;
   whisperVersion?: string;
@@ -36,9 +39,12 @@ export interface EstadoDependenciasSistema {
 export class DependencyManager {
   private static readonly CLAVE_CACHE_ESTADO = 'sephent_whisper_dependency_status_v1';
   public static readonly VERSION_MINIMA_PYTHON = '3.8.0';
+  public static readonly VERSION_MAXIMA_PYTHON = '3.13.x';
+  public static readonly VERSION_RECOMENDADA_PYTHON = '3.11 o 3.12';
 
   /**
-   * Valida si una versión de Python cumple con el requisito mínimo (>= 3.8) para OpenAI Whisper
+   * Valida si una versión de Python cumple con el rango compatible oficial (3.8 <= Python <= 3.13)
+   * requerido por el stack científico de OpenAI Whisper (torch, numba, numpy, tiktoken).
    */
   public static esVersionPythonCompatible(version?: string): boolean {
     if (!version) return false;
@@ -47,7 +53,21 @@ export class DependencyManager {
     if (partes.length === 0 || isNaN(partes[0])) return false;
     const major = partes[0];
     const minor = partes.length > 1 && !isNaN(partes[1]) ? partes[1] : 0;
-    return major === 3 && minor >= 8;
+    return major === 3 && minor >= 8 && minor <= 13;
+  }
+
+  /**
+   * Valida si la versión de Python corresponde a las versiones óptimas y recomendadas (Python 3.11 o 3.12)
+   * donde todos los wheels binarios de PyTorch, Numba, NumPy y TikToken disponen de máxima estabilidad en Windows.
+   */
+  public static esVersionPythonRecomendada(version?: string): boolean {
+    if (!version) return false;
+    const limpia = version.replace(/^[^\d]*/, '').trim();
+    const partes = limpia.split('.').map((p) => parseInt(p, 10));
+    if (partes.length === 0 || isNaN(partes[0])) return false;
+    const major = partes[0];
+    const minor = partes.length > 1 && !isNaN(partes[1]) ? partes[1] : 0;
+    return major === 3 && (minor === 11 || minor === 12);
   }
 
   /**
@@ -82,7 +102,10 @@ export class DependencyManager {
     return {
       pythonInstalado: true,
       pythonCompatible: true,
-      pythonMinVersion: '3.8.0',
+      pythonRecomendada: true,
+      pythonMinVersion: this.VERSION_MINIMA_PYTHON,
+      pythonMaxVersion: this.VERSION_MAXIMA_PYTHON,
+      pythonVersionRecomendada: this.VERSION_RECOMENDADA_PYTHON,
       whisperInstalado: true,
       torchInstalado: true,
       dependenciasCompletas: true,
@@ -110,9 +133,12 @@ export class DependencyManager {
     if (!this.esModoDesktop()) {
       const estadoWeb: EstadoDependenciasSistema = {
         pythonInstalado: true,
-        pythonVersion: '3.14 (Web Sandbox)',
+        pythonVersion: '3.12 (Web Sandbox)',
         pythonCompatible: true,
-        pythonMinVersion: '3.8.0',
+        pythonRecomendada: true,
+        pythonMinVersion: this.VERSION_MINIMA_PYTHON,
+        pythonMaxVersion: this.VERSION_MAXIMA_PYTHON,
+        pythonVersionRecomendada: this.VERSION_RECOMENDADA_PYTHON,
         whisperInstalado: true,
         whisperVersion: 'Web Engine',
         torchInstalado: true,
@@ -130,13 +156,19 @@ export class DependencyManager {
       const compatible = typeof datos.python_compatible === 'boolean'
         ? datos.python_compatible
         : this.esVersionPythonCompatible(datos.python_version);
+      const recomendada = typeof datos.python_recomendada === 'boolean'
+        ? datos.python_recomendada
+        : this.esVersionPythonRecomendada(datos.python_version);
 
       const estado: EstadoDependenciasSistema = {
         pythonInstalado: Boolean(datos.python_instalado),
         pythonVersion: datos.python_version,
         pythonRuta: datos.python_ruta,
         pythonCompatible: compatible,
+        pythonRecomendada: recomendada,
         pythonMinVersion: datos.python_min_version || this.VERSION_MINIMA_PYTHON,
+        pythonMaxVersion: datos.python_max_version || this.VERSION_MAXIMA_PYTHON,
+        pythonVersionRecomendada: datos.python_version_recomendada || this.VERSION_RECOMENDADA_PYTHON,
         errorCompatibilidad: datos.error_compatibilidad,
         whisperInstalado: Boolean(datos.whisper_instalado && compatible),
         whisperVersion: datos.whisper_version,
@@ -150,7 +182,7 @@ export class DependencyManager {
         sitePackagesRuta: datos.site_packages_ruta,
         dependenciasCompletas: Boolean(datos.python_instalado && compatible && datos.whisper_instalado),
         verificando: false,
-        ultimoError: !compatible ? (datos.error_compatibilidad || `Python ${datos.python_version} incompatible (requerido >= ${this.VERSION_MINIMA_PYTHON})`) : undefined,
+        ultimoError: !compatible ? (datos.error_compatibilidad || `Python ${datos.python_version} incompatible (rango soportado ${this.VERSION_MINIMA_PYTHON} - ${this.VERSION_MAXIMA_PYTHON}, preferente ${this.VERSION_RECOMENDADA_PYTHON})`) : undefined,
       };
 
       this.guardarEstado(estado);
@@ -163,7 +195,7 @@ export class DependencyManager {
     try {
       const cmd = new Command('python', [
         '-c',
-        'import sys, os, json, site;\nis_comp = (sys.version_info.major == 3 and sys.version_info.minor >= 8);\ntry:\n usp = site.getusersitepackages()\n if usp and os.path.exists(usp) and usp not in sys.path:\n  sys.path.insert(0, usp)\nexcept Exception:\n pass\nhas_whisper = False; ver = None; path = None; has_torch = False;\nif is_comp:\n try:\n  import whisper\n  has_whisper = True\n  ver = getattr(whisper, "__version__", "disponible")\n  path = getattr(whisper, "__file__", "")\n except Exception:\n  pass\n try:\n  import torch\n  has_torch = True\n except Exception:\n  pass\nprint(json.dumps({"python": sys.version.split()[0], "python_ruta": sys.executable, "python_compatible": is_comp, "whisper": has_whisper, "version": ver, "path": path, "torch": has_torch}))',
+        'import sys, os, json, site;\nis_comp = (sys.version_info.major == 3 and 8 <= sys.version_info.minor <= 13);\nis_recom = (sys.version_info.major == 3 and (sys.version_info.minor == 11 or sys.version_info.minor == 12));\ntry:\n usp = site.getusersitepackages()\n if usp and os.path.exists(usp) and usp not in sys.path:\n  sys.path.insert(0, usp)\nexcept Exception:\n pass\nhas_whisper = False; ver = None; path = None; has_torch = False;\nif is_comp:\n try:\n  import whisper\n  has_whisper = True\n  ver = getattr(whisper, "__version__", "disponible")\n  path = getattr(whisper, "__file__", "")\n except Exception:\n  pass\n try:\n  import torch\n  has_torch = True\n except Exception:\n  pass\nprint(json.dumps({"python": sys.version.split()[0], "python_ruta": sys.executable, "python_compatible": is_comp, "python_recomendada": is_recom, "whisper": has_whisper, "version": ver, "path": path, "torch": has_torch}))',
       ]);
 
       const salida = await cmd.execute();
@@ -172,15 +204,23 @@ export class DependencyManager {
         const lineas = salida.stdout.trim().split('\n');
         const ultimaLinea = lineas[lineas.length - 1];
         const resultado = JSON.parse(ultimaLinea);
-        const compatible = Boolean(resultado.python_compatible);
+        const compatible = typeof resultado.python_compatible === 'boolean'
+          ? Boolean(resultado.python_compatible)
+          : this.esVersionPythonCompatible(resultado.python);
+        const recomendada = typeof resultado.python_recomendada === 'boolean'
+          ? Boolean(resultado.python_recomendada)
+          : this.esVersionPythonRecomendada(resultado.python);
 
         const estado: EstadoDependenciasSistema = {
           pythonInstalado: Boolean(resultado.python),
           pythonVersion: resultado.python,
           pythonRuta: resultado.python_ruta,
           pythonCompatible: compatible,
+          pythonRecomendada: recomendada,
           pythonMinVersion: this.VERSION_MINIMA_PYTHON,
-          errorCompatibilidad: !compatible ? `Python ${resultado.python} incompatible (requiere >= ${this.VERSION_MINIMA_PYTHON})` : undefined,
+          pythonMaxVersion: this.VERSION_MAXIMA_PYTHON,
+          pythonVersionRecomendada: this.VERSION_RECOMENDADA_PYTHON,
+          errorCompatibilidad: !compatible ? `Python ${resultado.python} no está en el rango compatible (${this.VERSION_MINIMA_PYTHON} - ${this.VERSION_MAXIMA_PYTHON}). Se aconseja ${this.VERSION_RECOMENDADA_PYTHON}.` : undefined,
           whisperInstalado: Boolean(resultado.whisper && compatible),
           whisperVersion: resultado.version,
           rutaInstalacionWhisper: resultado.path,
@@ -188,7 +228,7 @@ export class DependencyManager {
           metodoDeteccion: 'Fallback Shell Command',
           dependenciasCompletas: Boolean(resultado.python && compatible && resultado.whisper),
           verificando: false,
-          ultimoError: !compatible ? `Python ${resultado.python} no cumple el requisito mínimo (>= ${this.VERSION_MINIMA_PYTHON})` : undefined,
+          ultimoError: !compatible ? `Python ${resultado.python} incompatible con el stack de OpenAI Whisper (requerido ${this.VERSION_MINIMA_PYTHON} - ${this.VERSION_MAXIMA_PYTHON})` : undefined,
         };
 
         this.guardarEstado(estado);

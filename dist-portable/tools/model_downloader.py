@@ -72,10 +72,13 @@ def obtener_directorio_cache_oficial() -> str:
 
 MIN_PYTHON_VERSION = (3, 8)
 MIN_PYTHON_VERSION_STR = "3.8.0"
+MAX_PYTHON_VERSION = (3, 13)
+MAX_PYTHON_VERSION_STR = "3.13.x"
+RECOMMENDED_PYTHON_VERSION_STR = "3.11 o 3.12"
 
 
 def comprobar_entorno():
-    """Verifica Python, Whisper, PyTorch y dependencias asegurando versión mínima requerida."""
+    """Verifica Python, Whisper, PyTorch y dependencias asegurando rango de compatibilidad y versiones preferidas."""
     # Asegurar inclusion de user-site y directorios canonicos de site-packages
     try:
         import site
@@ -88,21 +91,45 @@ def comprobar_entorno():
     if sys.platform == "win32":
         appdata = os.environ.get("APPDATA", "")
         if appdata:
-            for pyv in ["Python314", "Python313", "Python312", "Python311", "Python310", "Python39", "Python38"]:
+            for pyv in ["Python311", "Python312", "Python310", "Python39", "Python38", "Python313", "Python314"]:
                 sp = os.path.join(appdata, "Python", pyv, "site-packages")
                 if os.path.exists(sp) and sp not in sys.path:
                     sys.path.insert(0, sp)
 
-    is_compatible = sys.version_info >= MIN_PYTHON_VERSION
+    vinfo = sys.version_info
     py_ver = sys.version.split()[0]
+    py_major, py_minor = vinfo.major, vinfo.minor
+
+    # openai-whisper declara en PyPI Python >= 3.8 y hasta 3.13.
+    # Versiones >= 3.14 o < 3.8 no disponen de wheels compatibles para PyTorch, Numba, NumPy o TikToken.
+    is_compatible = (py_major == 3 and 8 <= py_minor <= 13)
+    es_recomendada = (py_major == 3 and (py_minor == 11 or py_minor == 12))
+
+    error_compat = ""
+    if not is_compatible:
+        if py_minor >= 14:
+            error_compat = (
+                f"Versión no compatible: Python {py_ver} detectado. Las librerías críticas de Whisper "
+                f"(PyTorch, Numba, NumPy, TikToken) requieren Python entre 3.8 y 3.13. "
+                f"Para máxima estabilidad se recomienda preferentemente Python {RECOMMENDED_PYTHON_VERSION_STR}."
+            )
+        else:
+            error_compat = (
+                f"Versión incompatible: Python {py_ver} detectado. OpenAI Whisper requiere como mínimo "
+                f"Python {MIN_PYTHON_VERSION_STR} y hasta {MAX_PYTHON_VERSION_STR}. "
+                f"Se recomienda preferentemente Python {RECOMMENDED_PYTHON_VERSION_STR}."
+            )
 
     resultado = {
         "python_instalado": True,
         "python_version": py_ver,
         "python_ruta": sys.executable.replace("\\", "/"),
         "python_compatible": is_compatible,
+        "python_recomendada": es_recomendada,
         "python_min_version": MIN_PYTHON_VERSION_STR,
-        "error_compatibilidad": "" if is_compatible else f"Versión incompatible: Python {py_ver} detectado. OpenAI Whisper requiere como mínimo Python {MIN_PYTHON_VERSION_STR}.",
+        "python_max_version": MAX_PYTHON_VERSION_STR,
+        "python_version_recomendada": RECOMMENDED_PYTHON_VERSION_STR,
+        "error_compatibilidad": error_compat,
         "whisper_instalado": False,
         "whisper_version": "",
         "whisper_ruta": "",

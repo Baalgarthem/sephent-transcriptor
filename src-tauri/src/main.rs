@@ -27,7 +27,10 @@ pub struct InfoEntorno {
     pub python_version: String,
     pub python_ruta: String,
     pub python_compatible: bool,
+    pub python_recomendada: bool,
     pub python_min_version: String,
+    pub python_max_version: String,
+    pub python_version_recomendada: String,
     pub error_compatibilidad: String,
     pub whisper_instalado: bool,
     pub whisper_version: String,
@@ -49,7 +52,10 @@ impl Default for InfoEntorno {
             python_version: String::new(),
             python_ruta: String::new(),
             python_compatible: false,
+            python_recomendada: false,
             python_min_version: "3.8.0".to_string(),
+            python_max_version: "3.13.x".to_string(),
+            python_version_recomendada: "3.11 o 3.12".to_string(),
             error_compatibilidad: String::new(),
             whisper_instalado: false,
             whisper_version: String::new(),
@@ -69,6 +75,9 @@ impl Default for InfoEntorno {
 pub const MIN_PYTHON_MAJOR: u32 = 3;
 pub const MIN_PYTHON_MINOR: u32 = 8;
 pub const MIN_PYTHON_VERSION_STR: &str = "3.8.0";
+pub const MAX_PYTHON_MINOR: u32 = 13;
+pub const MAX_PYTHON_VERSION_STR: &str = "3.13.x";
+pub const RECOMMENDED_PYTHON_VERSION_STR: &str = "3.11 o 3.12";
 
 pub fn parsear_version_python(ver_str: &str) -> Option<(u32, u32, u32)> {
     let limpia = ver_str.trim().trim_start_matches("Python ").trim();
@@ -84,27 +93,75 @@ pub fn parsear_version_python(ver_str: &str) -> Option<(u32, u32, u32)> {
 
 pub fn es_version_python_compatible(ver_str: &str) -> bool {
     if let Some((major, minor, _)) = parsear_version_python(ver_str) {
-        major == MIN_PYTHON_MAJOR && minor >= MIN_PYTHON_MINOR
+        major == MIN_PYTHON_MAJOR && minor >= MIN_PYTHON_MINOR && minor <= MAX_PYTHON_MINOR
     } else {
         false
     }
 }
 
+pub fn es_version_python_recomendada(ver_str: &str) -> bool {
+    if let Some((major, minor, _)) = parsear_version_python(ver_str) {
+        major == 3 && (minor == 11 || minor == 12)
+    } else {
+        false
+    }
+}
+
+/// Asigna una puntuación técnica a cada instalación de Python para priorizar preferentemente 3.11 y 3.12
+pub fn calcular_puntuacion_candidato(ver_str: &str, whisper_instalado: bool, torch_instalado: bool) -> i32 {
+    let mut score = 0;
+    if let Some((major, minor, _)) = parsear_version_python(ver_str) {
+        if major == 3 {
+            match minor {
+                11 => score += 100, // Preferida: máxima estabilidad y compatibilidad con PyTorch, Numba, NumPy y TikToken
+                12 => score += 95,  // Moderna y recomendada oficial por el ecosistema científico
+                10 => score += 80,  // Madura y muy estable
+                9  => score += 70,  // Estable
+                8  => score += 60,  // Mínima soportada
+                13 => score += 50,  // Soportada en metadata oficial pero reciente en algunos wheels
+                _  => score -= 200, // Incompatible (ej. 3.14+ o < 3.8: carece de wheels binarios estables)
+            }
+        } else {
+            score -= 200;
+        }
+    } else {
+        score -= 200;
+    }
+
+    if whisper_instalado {
+        score += 80;
+    }
+    if torch_instalado {
+        score += 40;
+    }
+    score
+}
+
 static ENTORNO_CACHE: Mutex<Option<InfoEntorno>> = Mutex::new(None);
 
 const SCRIPT_INLINE_PROBE: &str = r#"import sys, json, os, site
-min_major, min_minor = 3, 8
 py_ver = sys.version.split()[0]
 py_major, py_minor = sys.version_info.major, sys.version_info.minor
-is_compatible = (py_major == min_major and py_minor >= min_minor)
+is_compatible = (py_major == 3 and 8 <= py_minor <= 13)
+is_recommended = (py_major == 3 and (py_minor == 11 or py_minor == 12))
+
+err_msg = ""
+if not is_compatible:
+    if py_minor >= 14:
+        err_msg = f"Python {py_ver} detectado no es compatible. Las dependencias críticas (PyTorch, Numba, NumPy, TikToken) requieren Python entre 3.8 y 3.13. Se recomienda preferentemente Python 3.11 o Python 3.12."
+    else:
+        err_msg = f"Python {py_ver} es incompatible. OpenAI Whisper requiere como mínimo Python 3.8 y hasta 3.13. Se recomienda preferentemente Python 3.11 o Python 3.12."
 
 res = {
     'python_instalado': True,
     'python_version': py_ver,
     'python_ruta': sys.executable.replace('\\', '/'),
     'python_compatible': is_compatible,
+    'python_recomendada': is_recommended,
     'python_min_version': '3.8.0',
-    'error_compatibilidad': '' if is_compatible else f'Python {py_ver} es incompatible. OpenAI Whisper requiere como mínimo Python 3.8.',
+    'python_max_version': '3.13.x',
+    'python_version_recomendada': '3.11 o 3.12',
+    'error_compatibilidad': err_msg,
     'whisper_instalado': False,
     'whisper_version': '',
     'whisper_ruta': '',
@@ -261,7 +318,7 @@ fn resolver_entorno(forzar_redeteccion: bool) -> InfoEntorno {
 
     // 5. Rutas estándar conocidas en Windows (LOCALAPPDATA, Program Files, etc.)
     if let Ok(local_app_data) = std::env::var("LOCALAPPDATA") {
-        for v in &["pythoncore-3.14-64", "pythoncore-3.13-64", "pythoncore-3.12-64"] {
+        for v in &["pythoncore-3.11-64", "pythoncore-3.12-64", "pythoncore-3.10-64", "pythoncore-3.9-64", "pythoncore-3.8-64", "pythoncore-3.13-64", "pythoncore-3.14-64"] {
             let p = PathBuf::from(&local_app_data).join("Python").join(v).join("python.exe");
             if p.exists() {
                 candidatos.push((p.to_string_lossy().to_string(), format!("LOCALAPPDATA {}", v)));
@@ -272,7 +329,7 @@ fn resolver_entorno(forzar_redeteccion: bool) -> InfoEntorno {
             }
         }
 
-        for v in &["Python314", "Python313", "Python312", "Python311", "Python310"] {
+        for v in &["Python311", "Python312", "Python310", "Python39", "Python38", "Python313", "Python314"] {
             let p = PathBuf::from(&local_app_data).join("Programs").join("Python").join(v).join("python.exe");
             if p.exists() {
                 candidatos.push((p.to_string_lossy().to_string(), format!("Programs/Python {}", v)));
@@ -289,7 +346,7 @@ fn resolver_entorno(forzar_redeteccion: bool) -> InfoEntorno {
         }
     }
 
-    for v in &["Python314", "Python313", "Python312", "Python311", "Python310"] {
+    for v in &["Python311", "Python312", "Python310", "Python39", "Python38", "Python313", "Python314"] {
         let p = PathBuf::from(format!(r"C:\Program Files\{}\python.exe", v));
         if p.exists() {
             candidatos.push((p.to_string_lossy().to_string(), format!("Program Files {}", v)));
@@ -315,7 +372,8 @@ fn resolver_entorno(forzar_redeteccion: bool) -> InfoEntorno {
     }
 
     // 6. Probar cada candidato activamente con el script de sonda seguro
-    let mut mejor_python_fallback: Option<(String, String, String)> = None; // (cmd, ruta, version)
+    let mut mejor_candidato_info: Option<(i32, InfoEntorno)> = None;
+    let mut primer_incompatible: Option<(String, String)> = None; // (version, ruta)
 
     for (cand_cmd, origen) in &candidatos_unicos {
         let mut probe = Command::new(cand_cmd);
@@ -333,7 +391,6 @@ fn resolver_entorno(forzar_redeteccion: bool) -> InfoEntorno {
                     let py_ruta = res_json["python_ruta"].as_str().unwrap_or("").to_string();
                     let is_comp = res_json["python_compatible"].as_bool().unwrap_or(false)
                         && es_version_python_compatible(&py_ver);
-                    let _err_comp = res_json["error_compatibilidad"].as_str().unwrap_or("").to_string();
                     let w_inst = res_json["whisper_instalado"].as_bool().unwrap_or(false);
                     let w_ver = res_json["whisper_version"].as_str().unwrap_or("").to_string();
                     let w_ruta = res_json["whisper_ruta"].as_str().unwrap_or("").to_string();
@@ -343,121 +400,136 @@ fn resolver_entorno(forzar_redeteccion: bool) -> InfoEntorno {
                     let cache = res_json["ruta_cache_oficial"].as_str().unwrap_or("").to_string();
 
                     if !is_comp {
+                        if primer_incompatible.is_none() {
+                            primer_incompatible = Some((py_ver.clone(), py_ruta.clone()));
+                        }
                         info.candidatos_evaluados.push(format!(
-                            "Rechazado [{}] py={} (Incompatible con OpenAI Whisper: requiere >= {})",
-                            origen, py_ver, MIN_PYTHON_VERSION_STR
+                            "Rechazado [{}] py={} (Incompatible con OpenAI Whisper: requiere {} - {}, preferente {})",
+                            origen, py_ver, MIN_PYTHON_VERSION_STR, MAX_PYTHON_VERSION_STR, RECOMMENDED_PYTHON_VERSION_STR
                         ));
                         continue;
                     }
 
-                    if mejor_python_fallback.is_none() {
-                        mejor_python_fallback = Some((cand_cmd.clone(), py_ruta.clone(), py_ver.clone()));
-                    }
+                    let is_recom = es_version_python_recomendada(&py_ver);
+                    let score = calcular_puntuacion_candidato(&py_ver, w_inst, t_inst);
 
                     info.candidatos_evaluados.push(format!(
-                        "Candidato Compatible [{}] py={} w={} t={}",
-                        origen, py_ver, w_inst, t_inst
+                        "Candidato Compatible [{}] py={} (score={}) recom={} w={} t={}",
+                        origen, py_ver, score, is_recom, w_inst, t_inst
                     ));
 
-                    if w_inst {
-                        info.python_instalado = true;
-                        info.python_version = py_ver;
-                        info.python_ruta = if !py_ruta.is_empty() { py_ruta } else { cand_cmd.clone() };
-                        info.python_compatible = true;
-                        info.python_min_version = MIN_PYTHON_VERSION_STR.to_string();
-                        info.whisper_instalado = true;
-                        info.whisper_version = if !w_ver.is_empty() {
-                            w_ver
-                        } else {
-                            whisper_ver_pip.clone().unwrap_or_else(|| "20250625".to_string())
-                        };
-                        info.whisper_ruta = w_ruta;
-                        info.whisper_cli_ruta = whisper_cli_encontrado.clone().unwrap_or_default();
-                        info.torch_instalado = t_inst;
-                        info.torch_version = t_ver;
-                        info.cuda_disponible = cuda;
-                        info.ruta_cache_oficial = cache;
-                        info.metodo_deteccion = format!("{}: {}", origen, cand_cmd);
-                        info.site_packages_ruta = site_packages_detectado.unwrap_or_default();
+                    let mut cand_info = info.clone();
+                    cand_info.python_instalado = true;
+                    cand_info.python_version = py_ver.clone();
+                    cand_info.python_ruta = if !py_ruta.is_empty() { py_ruta.clone() } else { cand_cmd.clone() };
+                    cand_info.python_compatible = true;
+                    cand_info.python_recomendada = is_recom;
+                    cand_info.python_min_version = MIN_PYTHON_VERSION_STR.to_string();
+                    cand_info.python_max_version = MAX_PYTHON_VERSION_STR.to_string();
+                    cand_info.python_version_recomendada = RECOMMENDED_PYTHON_VERSION_STR.to_string();
+                    cand_info.whisper_instalado = w_inst;
+                    cand_info.whisper_version = if !w_ver.is_empty() {
+                        w_ver
+                    } else if w_inst {
+                        whisper_ver_pip.clone().unwrap_or_else(|| "20250625".to_string())
+                    } else {
+                        String::new()
+                    };
+                    cand_info.whisper_ruta = w_ruta;
+                    cand_info.whisper_cli_ruta = whisper_cli_encontrado.clone().unwrap_or_default();
+                    cand_info.torch_instalado = t_inst;
+                    cand_info.torch_version = t_ver;
+                    cand_info.cuda_disponible = cuda;
+                    cand_info.ruta_cache_oficial = cache;
+                    cand_info.metodo_deteccion = format!("{}: {}", origen, cand_cmd);
+                    cand_info.site_packages_ruta = site_packages_detectado.clone().unwrap_or_default();
 
-                        // Guardar en caché y retornar el ganador absoluto
-                        if let Ok(mut guard) = ENTORNO_CACHE.lock() {
-                            *guard = Some(info.clone());
-                        }
-                        return info;
+                    let mejor = match &mejor_candidato_info {
+                        None => true,
+                        Some((mejor_score, _)) => score > *mejor_score,
+                    };
+
+                    if mejor {
+                        mejor_candidato_info = Some((score, cand_info));
+                    }
+
+                    // Si encontramos una versión recomendada (3.11 o 3.12) con Whisper ya instalado, es la cúspide óptima
+                    if w_inst && is_recom {
+                        break;
                     }
                 }
             }
         }
     }
 
-    // 7. Si no se pudo importar directamente pero se halló whisper.exe CLI en Scripts, verificar CLI
-    if let Some(ref cli_path) = whisper_cli_encontrado {
-        let mut cmd_cli = Command::new(cli_path);
-        cmd_cli.arg("--help");
-        configurar_proceso_oculto(&mut cmd_cli);
-        if let Ok(output) = cmd_cli.output() {
-            let stderr_or_stdout = format!(
-                "{}{}",
-                String::from_utf8_lossy(&output.stdout),
-                String::from_utf8_lossy(&output.stderr)
-            );
-            if stderr_or_stdout.contains("usage: python") || stderr_or_stdout.contains("--model") || output.status.success() {
-                let (_fallback_cmd, fallback_ruta, fallback_ver) = mejor_python_fallback
-                    .unwrap_or_else(|| ("python".to_string(), "python".to_string(), "3.14".to_string()));
+    // 7. Si encontramos un candidato compatible ganador
+    if let Some((_score, mut mejor)) = mejor_candidato_info {
+        mejor.candidatos_evaluados = info.candidatos_evaluados;
+        if mejor.whisper_instalado {
+            if let Ok(mut guard) = ENTORNO_CACHE.lock() {
+                *guard = Some(mejor.clone());
+            }
+            return mejor;
+        }
 
-                let is_comp = es_version_python_compatible(&fallback_ver);
-
-                info.python_instalado = true;
-                info.python_version = fallback_ver;
-                info.python_ruta = fallback_ruta;
-                info.python_compatible = is_comp;
-                info.python_min_version = MIN_PYTHON_VERSION_STR.to_string();
-                info.whisper_instalado = is_comp;
-                info.whisper_version = whisper_ver_pip.unwrap_or_else(|| "20250625 (CLI)".to_string());
-                info.whisper_cli_ruta = cli_path.clone();
-                info.metodo_deteccion = format!("CLI nativo verificado: {}", cli_path);
-                info.site_packages_ruta = site_packages_detectado.unwrap_or_default();
-
-                if !is_comp {
-                    info.error_compatibilidad = format!(
-                        "La versión de Python ({}) no cumple con el requisito mínimo (>= {}) para Whisper.",
-                        info.python_version, MIN_PYTHON_VERSION_STR
-                    );
+        // Si Python es compatible pero whisper.py no importó directo, comprobar whisper.exe CLI
+        if let Some(ref cli_path) = whisper_cli_encontrado {
+            let mut cmd_cli = Command::new(cli_path);
+            cmd_cli.arg("--help");
+            configurar_proceso_oculto(&mut cmd_cli);
+            if let Ok(output) = cmd_cli.output() {
+                let stderr_or_stdout = format!(
+                    "{}{}",
+                    String::from_utf8_lossy(&output.stdout),
+                    String::from_utf8_lossy(&output.stderr)
+                );
+                if stderr_or_stdout.contains("usage: python") || stderr_or_stdout.contains("--model") || output.status.success() {
+                    mejor.whisper_instalado = true;
+                    if mejor.whisper_version.is_empty() {
+                        mejor.whisper_version = whisper_ver_pip.unwrap_or_else(|| "20250625 (CLI)".to_string());
+                    }
+                    mejor.whisper_cli_ruta = cli_path.clone();
+                    mejor.metodo_deteccion = format!("CLI nativo verificado con Python {}: {}", mejor.python_version, cli_path);
+                    if let Ok(mut guard) = ENTORNO_CACHE.lock() {
+                        *guard = Some(mejor.clone());
+                    }
+                    return mejor;
                 }
-
-                if let Ok(mut guard) = ENTORNO_CACHE.lock() {
-                    *guard = Some(info.clone());
-                }
-                return info;
             }
         }
+
+        // Python compatible encontrado pero Whisper aún no instalado
+        mejor.metodo_deteccion = format!("Python {} compatible sin Whisper", mejor.python_version);
+        if let Ok(mut guard) = ENTORNO_CACHE.lock() {
+            *guard = Some(mejor.clone());
+        }
+        return mejor;
     }
 
-    // 8. Fallback: Python disponible pero Whisper pendiente de instalar o versión incompatible
-    if let Some((cmd, ruta, ver)) = mejor_python_fallback {
-        let is_comp = es_version_python_compatible(&ver);
+    // 8. Fallback: Si no hubo ningún candidato compatible en 3.8-3.13
+    if let Some((incomp_ver, incomp_ruta)) = primer_incompatible {
         info.python_instalado = true;
-        info.python_version = ver.clone();
-        info.python_ruta = ruta;
-        info.python_compatible = is_comp;
+        info.python_version = incomp_ver.clone();
+        info.python_ruta = incomp_ruta;
+        info.python_compatible = false;
         info.python_min_version = MIN_PYTHON_VERSION_STR.to_string();
+        info.python_max_version = MAX_PYTHON_VERSION_STR.to_string();
+        info.python_version_recomendada = RECOMMENDED_PYTHON_VERSION_STR.to_string();
         info.whisper_instalado = false;
-        if is_comp {
-            info.metodo_deteccion = format!("Python compatible sin whisper: {}", cmd);
-        } else {
-            info.error_compatibilidad = format!(
-                "Python {} detectado no es compatible. OpenAI Whisper requiere al menos Python {}.",
-                ver, MIN_PYTHON_VERSION_STR
-            );
-            info.metodo_deteccion = format!("Python incompatible: {}", cmd);
-        }
+        info.error_compatibilidad = format!(
+            "Python {} detectado no es compatible con el stack de OpenAI Whisper. Las dependencias científicas (PyTorch, Numba, NumPy, TikToken) requieren Python entre {} y {}. Se recomienda instalar preferentemente Python {}.",
+            incomp_ver, MIN_PYTHON_VERSION_STR, MAX_PYTHON_VERSION_STR, RECOMMENDED_PYTHON_VERSION_STR
+        );
+        info.metodo_deteccion = "Python fuera de rango detectado".to_string();
     } else {
         info.python_compatible = false;
         info.python_min_version = MIN_PYTHON_VERSION_STR.to_string();
+        info.python_max_version = MAX_PYTHON_VERSION_STR.to_string();
+        info.python_version_recomendada = RECOMMENDED_PYTHON_VERSION_STR.to_string();
+        info.whisper_instalado = false;
         info.error_compatibilidad = format!(
-            "No se encontró ninguna instalación de Python compatible con OpenAI Whisper (mínimo requerido: Python {}).",
-            MIN_PYTHON_VERSION_STR
+            "No se encontró ninguna instalación de Python compatible con OpenAI Whisper (rango requerido: {} a {}, recomendado preferentemente: {}).",
+            MIN_PYTHON_VERSION_STR, MAX_PYTHON_VERSION_STR, RECOMMENDED_PYTHON_VERSION_STR
         );
     }
 

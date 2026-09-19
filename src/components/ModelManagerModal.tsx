@@ -440,6 +440,7 @@ export const ModelManagerModal: React.FC<ModelManagerModalProps> = ({
   };
 
   const pythonCompatible = estadoDeps.pythonCompatible !== false && DependencyManager.esVersionPythonCompatible(estadoDeps.pythonVersion);
+  const pythonRecomendada = DependencyManager.esVersionPythonRecomendada(estadoDeps.pythonVersion) || estadoDeps.pythonRecomendada === true;
   const whisperDisponible = Boolean(estadoDeps.whisperInstalado && pythonCompatible);
 
   return (
@@ -552,19 +553,54 @@ export const ModelManagerModal: React.FC<ModelManagerModalProps> = ({
                   <div style={{ fontSize: '0.75rem', color: THEME_TOKENS.colors.textSecondary, marginTop: '0.15rem' }}>
                     {!pythonCompatible ? (
                       <span style={{ color: '#b91c1c' }}>
-                        ⚠️ {estadoDeps.errorCompatibilidad || `OpenAI Whisper requiere como mínimo Python ${estadoDeps.pythonMinVersion || '3.8'}. Por favor instala o selecciona Python 3.8+`}
+                        ⚠️ {estadoDeps.errorCompatibilidad || `OpenAI Whisper requiere Python entre ${estadoDeps.pythonMinVersion || '3.8'} y ${estadoDeps.pythonMaxVersion || '3.13'} (preferente ${estadoDeps.pythonVersionRecomendada || '3.11 o 3.12'}). Sus librerías científicas (PyTorch, Numba, NumPy, TikToken) requieren esta versión.`}
                       </span>
                     ) : whisperDisponible ? (
                       <div>
-                        <span>
-                          <strong>Versión Whisper:</strong> v{estadoDeps.whisperVersion || '20250625'} ·{' '}
-                          <strong>Intérprete:</strong> Python {estadoDeps.pythonVersion} (Compatible &ge; 3.8)
-                          {estadoDeps.cudaDisponible
-                            ? ' · PyTorch con aceleración CUDA (GPU)'
-                            : estadoDeps.torchInstalado
-                            ? ' · PyTorch activo'
-                            : ''}
-                        </span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
+                          <span>
+                            <strong>Versión Whisper:</strong> v{estadoDeps.whisperVersion || '20250625'} ·{' '}
+                            <strong>Intérprete:</strong> Python {estadoDeps.pythonVersion}
+                          </span>
+                          {pythonRecomendada ? (
+                            <span
+                              style={{
+                                display: 'inline-block',
+                                backgroundColor: '#dcfce7',
+                                color: '#166534',
+                                fontSize: '0.68rem',
+                                fontWeight: 600,
+                                padding: '0.1rem 0.45rem',
+                                borderRadius: '4px',
+                                border: '1px solid #bbf7d0',
+                              }}
+                            >
+                              ⭐ Versión Óptima (3.11 / 3.12)
+                            </span>
+                          ) : (
+                            <span
+                              style={{
+                                display: 'inline-block',
+                                backgroundColor: '#fef3c7',
+                                color: '#92400e',
+                                fontSize: '0.68rem',
+                                fontWeight: 500,
+                                padding: '0.1rem 0.45rem',
+                                borderRadius: '4px',
+                                border: '1px solid #fde68a',
+                              }}
+                            >
+                              Compatible (3.8-3.13)
+                            </span>
+                          )}
+                          <span>
+                            {estadoDeps.cudaDisponible
+                              ? ' · PyTorch con aceleración CUDA (GPU)'
+                              : estadoDeps.torchInstalado
+                              ? ' · PyTorch activo'
+                              : ''}
+                          </span>
+                        </div>
                         {estadoDeps.whisperCliRuta && (
                           <div style={{ fontSize: '0.7rem', color: THEME_TOKENS.colors.textMuted, marginTop: '0.1rem' }}>
                             CLI: {estadoDeps.whisperCliRuta}
@@ -580,7 +616,7 @@ export const ModelManagerModal: React.FC<ModelManagerModalProps> = ({
                       <span>
                         Se requiere que OpenAI Whisper esté instalado para descargar, gestionar y ejecutar modelos de voz.
                         {estadoDeps.pythonInstalado && (
-                          <span> (Python {estadoDeps.pythonVersion} compatible &ge; 3.8 detectado en {estadoDeps.pythonRuta || 'el sistema'})</span>
+                          <span> (Python {estadoDeps.pythonVersion} {pythonRecomendada ? '⭐ recomendado' : 'compatible'} detectado en {estadoDeps.pythonRuta || 'el sistema'})</span>
                         )}
                       </span>
                     )}

@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 """
 whisper_runner.py — Motor de Transcripcion Real con OpenAI Whisper
 
@@ -167,6 +167,19 @@ def transcribir(file_path: str, model_name: str, language: str, num_speakers: in
 
 
 def main():
+    # Validación de compatibilidad de Python para Whisper y dependencias (torch, numba, numpy, tiktoken)
+    py_major, py_minor = sys.version_info.major, sys.version_info.minor
+    if py_major != 3 or py_minor < 8 or py_minor > 13:
+        py_ver = sys.version.split()[0]
+        print(json.dumps({
+            "error": (
+                f"Versión de Python ({py_ver}) incompatible con OpenAI Whisper. Las dependencias críticas "
+                f"(PyTorch, Numba, NumPy, TikToken) requieren Python entre 3.8 y 3.13. "
+                f"Se recomienda preferentemente Python 3.11 o Python 3.12."
+            )
+        }, ensure_ascii=False))
+        sys.exit(1)
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--file", required=True)
     parser.add_argument("--model", default="small")
