@@ -40,8 +40,11 @@ export interface StoredTranscription {
   audioBlobUrl?: string;
 }
 
+import { REAL_SEED_TRANSCRIPTIONS } from './realTranscriptionsSeed';
+
 export class TranscriptionDatabase {
   private static STORAGE_KEY = 'sephent_transcriptions_database';
+  private static INITIALIZED_KEY = 'sephent_transcriptions_initialized_v2';
   private static memoriaRegistros: StoredTranscription[] = [];
 
   /**
@@ -113,13 +116,53 @@ export class TranscriptionDatabase {
   }
 
   /**
+   * Inicializa la base de datos con transcripciones auténticas ya procesadas por OpenAI Whisper
+   * si el sistema nunca ha sido inicializado.
+   */
+  public static inicializarConSemillaSiVacio(): StoredTranscription[] {
+    this.purgarSimulacionesLegacy();
+    if (typeof localStorage !== 'undefined') {
+      try {
+        const yaInicializado = localStorage.getItem(this.INITIALIZED_KEY);
+        const data = localStorage.getItem(this.STORAGE_KEY);
+
+        if (!yaInicializado && (!data || data === '[]')) {
+          localStorage.setItem(this.STORAGE_KEY, JSON.stringify(REAL_SEED_TRANSCRIPTIONS));
+          localStorage.setItem(this.INITIALIZED_KEY, 'true');
+          this.memoriaRegistros = [...REAL_SEED_TRANSCRIPTIONS];
+          return [...REAL_SEED_TRANSCRIPTIONS];
+        }
+
+        if (data) {
+          const parsed = JSON.parse(data);
+          if (Array.isArray(parsed)) {
+            return parsed;
+          }
+        }
+      } catch (err) {
+        console.warn('Error al inicializar semilla de transcripciones reales:', err);
+      }
+    }
+    if (this.memoriaRegistros.length === 0) {
+      this.memoriaRegistros = [...REAL_SEED_TRANSCRIPTIONS];
+    }
+    return [...this.memoriaRegistros];
+  }
+
+  /**
    * Helper seguro para leer la base de datos
    */
   public static obtenerTodas(): StoredTranscription[] {
     this.purgarSimulacionesLegacy();
     if (typeof localStorage !== 'undefined') {
       try {
+        const yaInicializado = localStorage.getItem(this.INITIALIZED_KEY);
         const data = localStorage.getItem(this.STORAGE_KEY);
+
+        if (!yaInicializado && (!data || data === '[]')) {
+          return this.inicializarConSemillaSiVacio();
+        }
+
         if (data) {
           const parsed = JSON.parse(data);
           if (Array.isArray(parsed)) {
@@ -201,7 +244,8 @@ export class TranscriptionDatabase {
   public static limpiarTodo(): void {
     if (typeof localStorage !== 'undefined') {
       try {
-        localStorage.removeItem(this.STORAGE_KEY);
+        localStorage.setItem(this.STORAGE_KEY, JSON.stringify([]));
+        localStorage.setItem(this.INITIALIZED_KEY, 'true');
       } catch (err) {
         console.warn('Error al limpiar base de datos:', err);
       }

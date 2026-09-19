@@ -105,9 +105,10 @@ async function ejecutarPruebasSilenciosasYPlataforma() {
   afirmar(DependencyManager.esVersionPythonCompatible('3.10.11') === true, 'Python 3.10.11 es compatible');
   afirmar(DependencyManager.esVersionPythonCompatible('3.13.2') === true, 'Python 3.13.2 es compatible (máximo soportado)');
 
-  // Versiones incompatibles (fuera del soporte oficial de dependencias PyTorch/Numba/NumPy/TikToken)
-  afirmar(DependencyManager.esVersionPythonCompatible('3.14.0') === false, 'Python 3.14.0 es incompatible (sin wheels estables de torch/numba)');
-  afirmar(DependencyManager.esVersionPythonCompatible('3.15.0') === false, 'Python 3.15.0 es incompatible');
+  // Versiones compatibles (>= 3.8)
+  afirmar(DependencyManager.esVersionPythonCompatible('3.14.0') === true, 'Python 3.14.0 es compatible (>= 3.8)');
+
+  // Versiones incompatibles (< 3.8 o indefinidas)
   afirmar(DependencyManager.esVersionPythonCompatible('3.7.9') === false, 'Python 3.7.9 es incompatible (< 3.8)');
   afirmar(DependencyManager.esVersionPythonCompatible('2.7.18') === false, 'Python 2.7.18 es incompatible');
   afirmar(DependencyManager.esVersionPythonCompatible(undefined) === false, 'Versión indefinida es incompatible');

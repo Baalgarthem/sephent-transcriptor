@@ -43,8 +43,8 @@ export class DependencyManager {
   public static readonly VERSION_RECOMENDADA_PYTHON = '3.11 o 3.12';
 
   /**
-   * Valida si una versión de Python cumple con el rango compatible oficial (3.8 <= Python <= 3.13)
-   * requerido por el stack científico de OpenAI Whisper (torch, numba, numpy, tiktoken).
+   * Valida si una versión de Python cumple con el requisito mínimo oficial (Python >= 3.8)
+   * para OpenAI Whisper, recomendando preferentemente Python 3.11 o 3.12 por estabilidad de PyTorch, Numba, etc.
    */
   public static esVersionPythonCompatible(version?: string): boolean {
     if (!version) return false;
@@ -53,7 +53,7 @@ export class DependencyManager {
     if (partes.length === 0 || isNaN(partes[0])) return false;
     const major = partes[0];
     const minor = partes.length > 1 && !isNaN(partes[1]) ? partes[1] : 0;
-    return major === 3 && minor >= 8 && minor <= 13;
+    return major === 3 && minor >= 8;
   }
 
   /**
@@ -195,7 +195,7 @@ export class DependencyManager {
     try {
       const cmd = new Command('python', [
         '-c',
-        'import sys, os, json, site;\nis_comp = (sys.version_info.major == 3 and 8 <= sys.version_info.minor <= 13);\nis_recom = (sys.version_info.major == 3 and (sys.version_info.minor == 11 or sys.version_info.minor == 12));\ntry:\n usp = site.getusersitepackages()\n if usp and os.path.exists(usp) and usp not in sys.path:\n  sys.path.insert(0, usp)\nexcept Exception:\n pass\nhas_whisper = False; ver = None; path = None; has_torch = False;\nif is_comp:\n try:\n  import whisper\n  has_whisper = True\n  ver = getattr(whisper, "__version__", "disponible")\n  path = getattr(whisper, "__file__", "")\n except Exception:\n  pass\n try:\n  import torch\n  has_torch = True\n except Exception:\n  pass\nprint(json.dumps({"python": sys.version.split()[0], "python_ruta": sys.executable, "python_compatible": is_comp, "python_recomendada": is_recom, "whisper": has_whisper, "version": ver, "path": path, "torch": has_torch}))',
+        'import sys, os, json, site;\nis_comp = (sys.version_info.major == 3 and sys.version_info.minor >= 8);\nis_recom = (sys.version_info.major == 3 and (sys.version_info.minor == 11 or sys.version_info.minor == 12));\ntry:\n usp = site.getusersitepackages()\n if usp and os.path.exists(usp) and usp not in sys.path:\n  sys.path.insert(0, usp)\nexcept Exception:\n pass\nhas_whisper = False; ver = None; path = None; has_torch = False;\nif is_comp:\n try:\n  import whisper\n  has_whisper = True\n  ver = getattr(whisper, "__version__", "disponible")\n  path = getattr(whisper, "__file__", "")\n except Exception:\n  pass\n try:\n  import torch\n  has_torch = True\n except Exception:\n  pass\nprint(json.dumps({"python": sys.version.split()[0], "python_ruta": sys.executable, "python_compatible": is_comp, "python_recomendada": is_recom, "whisper": has_whisper, "version": ver, "path": path, "torch": has_torch}))',
       ]);
 
       const salida = await cmd.execute();

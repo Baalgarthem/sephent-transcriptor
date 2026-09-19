@@ -587,13 +587,49 @@ export default function TranscriptionPanel(): React.ReactElement {
         );
 
         const carpetaDestino = OutputPathService.resolverCarpetaDestino(file.name, modoDestino);
-        const salidasBD = record.outputs.map((out) => ({
-          format: out.formatId,
-          fileName: out.fileName,
-          fullPath: modoDestino === 'default'
-            ? `${OutputPathService.obtenerRutaPorDefecto()}\\${out.fileName}`
-            : `[Carpeta de origen]\\${out.fileName}`,
-        }));
+        const rutaOrigenDirectorio = ((file as any).__tauriPath || (file as any).path)
+          ? String((file as any).__tauriPath || (file as any).path).replace(/\\/g, '/').split('/').slice(0, -1).join('/')
+          : '';
+
+        const salidasBD = record.outputs.map((out) => {
+          let fullPath = '';
+          if (modoDestino === 'original' && rutaOrigenDirectorio) {
+            fullPath = `${rutaOrigenDirectorio}/${out.fileName}`.replace(/\//g, '\\');
+          } else {
+            fullPath = `${OutputPathService.obtenerRutaPorDefecto()}\\${out.fileName}`;
+          }
+          return {
+            format: out.formatId,
+            fileName: out.fileName,
+            fullPath,
+          };
+        });
+
+        // Guardar físicamente los archivos .txt y .srt generados en el disco duro en entorno de escritorio
+        if (typeof window !== 'undefined' && (window as any).__TAURI__?.invoke) {
+          const tauri = (window as any).__TAURI__;
+          for (const out of salidasBD) {
+            if (out.format === 'txt' && resultadoAudio.txtContent && out.fullPath) {
+              try {
+                await tauri.invoke('guardar_archivo_texto', {
+                  ruta: out.fullPath,
+                  contenido: resultadoAudio.txtContent,
+                });
+              } catch (writeErr) {
+                console.warn('Aviso al guardar archivo TXT en disco:', writeErr);
+              }
+            } else if (out.format === 'srt' && resultadoAudio.srtContent && out.fullPath) {
+              try {
+                await tauri.invoke('guardar_archivo_texto', {
+                  ruta: out.fullPath,
+                  contenido: resultadoAudio.srtContent,
+                });
+              } catch (writeErr) {
+                console.warn('Aviso al guardar archivo SRT en disco:', writeErr);
+              }
+            }
+          }
+        }
 
         const registroBD = TranscriptionDatabase.guardar({
           fileName: file.name,
@@ -1817,23 +1853,43 @@ export default function TranscriptionPanel(): React.ReactElement {
                   </div>
 
                   <div style={{ marginTop: '0.6rem', display: 'flex', gap: '0.6rem', flexWrap: 'wrap' }}>
-                    {item.outputs.map((out, outIdx) => (
-                      <span
-                        key={outIdx}
-                        style={{
-                          fontSize: '0.725rem',
-                          padding: '0.2rem 0.5rem',
-                          backgroundColor: THEME_TOKENS.colors.surfaceBase,
-                          border: `1px solid ${THEME_TOKENS.colors.borderSubtle}`,
-                          borderRadius: THEME_TOKENS.radii.xs,
-                          fontFamily: THEME_TOKENS.fonts.mono,
-                          color: THEME_TOKENS.colors.textPrimary,
-                        }}
-                        title={`Ruta absoluta: ${out.fullPath}`}
-                      >
-                        📄 {out.fileName} ({out.format.toUpperCase()})
-                      </span>
-                    ))}
+                    {item.outputs.map((out, outIdx) => {
+                      const contenido = out.format === 'txt' ? item.textContent : item.srtContent;
+                      return (
+                        <button
+                          key={outIdx}
+                          type="button"
+                          onClick={() => {
+                            if (!contenido) return;
+                            const blob = new Blob([contenido], { type: 'text/plain;charset=utf-8' });
+                            const url = URL.createObjectURL(blob);
+                            const a = document.createElement('a');
+                            a.href = url;
+                            a.download = out.fileName;
+                            a.click();
+                            URL.revokeObjectURL(url);
+                          }}
+                          style={{
+                            fontSize: '0.725rem',
+                            padding: '0.2rem 0.55rem',
+                            backgroundColor: THEME_TOKENS.colors.surfaceBase,
+                            border: `1px solid ${THEME_TOKENS.colors.borderSubtle}`,
+                            borderRadius: THEME_TOKENS.radii.xs,
+                            fontFamily: THEME_TOKENS.fonts.mono,
+                            color: THEME_TOKENS.colors.textPrimary,
+                            cursor: 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '0.35rem',
+                            fontWeight: 500,
+                          }}
+                          title={`Descargar archivo ${out.fileName} (Ubicación: ${out.fullPath})`}
+                        >
+                          <span>↓</span>
+                          <span>{out.fileName} ({out.format.toUpperCase()})</span>
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
               ))}

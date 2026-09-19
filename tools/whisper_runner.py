@@ -167,15 +167,14 @@ def transcribir(file_path: str, model_name: str, language: str, num_speakers: in
 
 
 def main():
-    # Validación de compatibilidad de Python para Whisper y dependencias (torch, numba, numpy, tiktoken)
+    # Validación de versión mínima requerida (>= 3.8) y recomendación pedagógica (3.11 / 3.12)
     py_major, py_minor = sys.version_info.major, sys.version_info.minor
-    if py_major != 3 or py_minor < 8 or py_minor > 13:
+    if py_major != 3 or py_minor < 8:
         py_ver = sys.version.split()[0]
         print(json.dumps({
             "error": (
-                f"Versión de Python ({py_ver}) incompatible con OpenAI Whisper. Las dependencias críticas "
-                f"(PyTorch, Numba, NumPy, TikToken) requieren Python entre 3.8 y 3.13. "
-                f"Se recomienda preferentemente Python 3.11 o Python 3.12."
+                f"Versión de Python ({py_ver}) incompatible con OpenAI Whisper. Se requiere como mínimo Python 3.8 "
+                f"(recomendado preferentemente Python 3.11 o Python 3.12 debido a torch, numba, numpy y tiktoken)."
             )
         }, ensure_ascii=False))
         sys.exit(1)

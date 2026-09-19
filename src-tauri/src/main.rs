@@ -93,7 +93,7 @@ pub fn parsear_version_python(ver_str: &str) -> Option<(u32, u32, u32)> {
 
 pub fn es_version_python_compatible(ver_str: &str) -> bool {
     if let Some((major, minor, _)) = parsear_version_python(ver_str) {
-        major == MIN_PYTHON_MAJOR && minor >= MIN_PYTHON_MINOR && minor <= MAX_PYTHON_MINOR
+        major == MIN_PYTHON_MAJOR && minor >= MIN_PYTHON_MINOR
     } else {
         false
     }
@@ -111,15 +111,15 @@ pub fn es_version_python_recomendada(ver_str: &str) -> bool {
 pub fn calcular_puntuacion_candidato(ver_str: &str, whisper_instalado: bool, torch_instalado: bool) -> i32 {
     let mut score = 0;
     if let Some((major, minor, _)) = parsear_version_python(ver_str) {
-        if major == 3 {
+        if major == 3 && minor >= 8 {
             match minor {
                 11 => score += 100, // Preferida: máxima estabilidad y compatibilidad con PyTorch, Numba, NumPy y TikToken
                 12 => score += 95,  // Moderna y recomendada oficial por el ecosistema científico
                 10 => score += 80,  // Madura y muy estable
                 9  => score += 70,  // Estable
                 8  => score += 60,  // Mínima soportada
-                13 => score += 50,  // Soportada en metadata oficial pero reciente en algunos wheels
-                _  => score -= 200, // Incompatible (ej. 3.14+ o < 3.8: carece de wheels binarios estables)
+                13 => score += 55,  // Soportada en metadata oficial
+                _  => score += 50,  // Soportada si cuenta con dependencias nativas compiladas
             }
         } else {
             score -= 200;
@@ -129,10 +129,10 @@ pub fn calcular_puntuacion_candidato(ver_str: &str, whisper_instalado: bool, tor
     }
 
     if whisper_instalado {
-        score += 80;
+        score += 100;
     }
     if torch_instalado {
-        score += 40;
+        score += 50;
     }
     score
 }
@@ -142,15 +142,12 @@ static ENTORNO_CACHE: Mutex<Option<InfoEntorno>> = Mutex::new(None);
 const SCRIPT_INLINE_PROBE: &str = r#"import sys, json, os, site
 py_ver = sys.version.split()[0]
 py_major, py_minor = sys.version_info.major, sys.version_info.minor
-is_compatible = (py_major == 3 and 8 <= py_minor <= 13)
+is_compatible = (py_major == 3 and py_minor >= 8)
 is_recommended = (py_major == 3 and (py_minor == 11 or py_minor == 12))
 
 err_msg = ""
 if not is_compatible:
-    if py_minor >= 14:
-        err_msg = f"Python {py_ver} detectado no es compatible. Las dependencias críticas (PyTorch, Numba, NumPy, TikToken) requieren Python entre 3.8 y 3.13. Se recomienda preferentemente Python 3.11 o Python 3.12."
-    else:
-        err_msg = f"Python {py_ver} es incompatible. OpenAI Whisper requiere como mínimo Python 3.8 y hasta 3.13. Se recomienda preferentemente Python 3.11 o Python 3.12."
+    err_msg = f"Python {py_ver} es incompatible. OpenAI Whisper requiere como mínimo Python 3.8. Se recomienda preferentemente Python 3.11 o Python 3.12."
 
 res = {
     'python_instalado': True,
@@ -870,6 +867,16 @@ async fn transcribir_audio_whisper(
         };
 
         let mut cmd = Command::new(&info.python_ruta);
+        if !info.site_packages_ruta.is_empty() {
+            cmd.env("PYTHONPATH", &info.site_packages_ruta);
+        }
+        if !info.whisper_cli_ruta.is_empty() {
+            if let Some(scripts_dir) = Path::new(&info.whisper_cli_ruta).parent() {
+                if let Ok(curr_path) = std::env::var("PATH") {
+                    cmd.env("PATH", format!("{};{}", scripts_dir.display(), curr_path));
+                }
+            }
+        }
         cmd.arg(&runner_path);
         cmd.arg("--file");
         cmd.arg(&ruta_audio);
