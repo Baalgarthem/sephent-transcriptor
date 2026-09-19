@@ -196,6 +196,16 @@ export class ModelManager {
       }
     }
 
+    // Auto-recuperación: si la caché local está vacía y estamos en entorno desktop,
+    // disparar una sincronización asíncrona en segundo plano para redescubrir archivos físicos
+    const tieneModelos = Object.keys(modelosLocales).length > 0;
+    const esDesktop = typeof window !== 'undefined' && !!((window as any).__TAURI__ || (window as any).__TAURI_IPC__ || (window as any).__TAURI_METADATA__);
+    if (!tieneModelos && esDesktop) {
+      setTimeout(() => {
+        this.sincronizarModelosEnRutaOficial().catch(() => {});
+      }, 0);
+    }
+
     const resultado: ModeloInstaladoInfo[] = [];
 
     // Recorrer todos los modelos canónicos de Whisper
@@ -245,7 +255,10 @@ export class ModelManager {
     }
 
     try {
-      const rawJson = await invoke<string>('auditar_modelos');
+      const invoker = (typeof window !== 'undefined' && (window as any).__TAURI__?.invoke)
+        ? (window as any).__TAURI__.invoke
+        : invoke;
+      const rawJson = await invoker('auditar_modelos');
       const resultado = typeof rawJson === 'string' ? JSON.parse(rawJson) : rawJson;
       if (resultado && resultado.rutaOficial) {
         WhisperPathService.actualizarRutaDetectada(resultado.rutaOficial);

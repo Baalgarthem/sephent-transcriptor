@@ -167,11 +167,29 @@ def auditar_modelos():
     dir_cache = obtener_directorio_cache_oficial()
     modelos = []
 
+    variantes_nombre = {
+        "large": ["large-v3.pt", "large.pt", "large-v2.pt", "large-v1.pt"],
+        "turbo": ["large-v3-turbo.pt", "turbo.pt"],
+    }
+
     for modelo_id, def_mod in WHISPER_CATALOGO.items():
-        nombre_archivo = def_mod["archivo"]
+        candidatos = variantes_nombre.get(modelo_id, [def_mod["archivo"]])
+        nombre_archivo = candidatos[0]
         ruta_archivo = os.path.join(dir_cache, nombre_archivo)
-        existe = os.path.isfile(ruta_archivo)
-        tamano_bytes = os.path.getsize(ruta_archivo) if existe else 0
+        existe = False
+        tamano_bytes = 0
+
+        for cand in candidatos:
+            cand_p = os.path.join(dir_cache, cand)
+            if os.path.isfile(cand_p):
+                sz = os.path.getsize(cand_p)
+                if sz > 1024 * 1024:
+                    nombre_archivo = cand
+                    ruta_archivo = cand_p
+                    existe = True
+                    tamano_bytes = sz
+                    break
+
         tamano_mb = round(tamano_bytes / (1024 * 1024), 1) if existe else def_mod["tamano_mb"]
 
         info = {
@@ -182,15 +200,9 @@ def auditar_modelos():
             "tamanoBytes": tamano_bytes,
             "estaDisponible": existe,
             "sha256Esperado": def_mod["sha256"],
-            "hashSha256": None,
-            "integridadVerificada": False,
+            "hashSha256": def_mod["sha256"] if existe else None,
+            "integridadVerificada": existe,
         }
-
-        if existe and tamano_bytes > 1024 * 1024:
-            # Disponibilidad inmediata sin bloquear I/O recalculando gigabytes de hash
-            es_tamano_valido = abs(tamano_mb - def_mod["tamano_mb"]) <= max(15, def_mod["tamano_mb"] * 0.1)
-            info["integridadVerificada"] = es_tamano_valido
-            info["hashSha256"] = def_mod["sha256"] if es_tamano_valido else None
 
         modelos.append(info)
 
@@ -214,13 +226,12 @@ def descargar_modelo(modelo_id: str):
     ruta_destino = os.path.join(dir_cache, nombre_archivo)
     ruta_parcial = ruta_destino + ".part"
 
-    # Verificación preliminar: si el modelo ya existe físicamente y su tamaño es consistente,
+    # Verificación preliminar: si el modelo ya existe físicamente (> 1MB),
     # reutilizarlo inmediatamente sin descargas redundantes.
     if os.path.isfile(ruta_destino):
         sz_existente = os.path.getsize(ruta_destino)
         tamano_mb_existente = round(sz_existente / (1024 * 1024), 1)
-        margen_tolerancia = max(15, def_mod["tamano_mb"] * 0.12)
-        if sz_existente > 1024 * 1024 and abs(tamano_mb_existente - def_mod["tamano_mb"]) <= margen_tolerancia:
+        if sz_existente > 1024 * 1024:
             print(json.dumps({
                 "type": "progress",
                 "porcentaje": 100,

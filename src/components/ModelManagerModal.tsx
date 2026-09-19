@@ -79,6 +79,10 @@ export const ModelManagerModal: React.FC<ModelManagerModalProps> = ({
   useEffect(() => {
     if (abierto) {
       recargarEstado();
+      // Sincronización inmediata con archivos en disco para reflejar estado en milisegundos
+      ModelManager.sincronizarModelosEnRutaOficial().then(() => {
+        recargarEstado();
+      });
       verificarYRecargar();
     }
   }, [abierto]);
@@ -691,13 +695,13 @@ export const ModelManagerModal: React.FC<ModelManagerModalProps> = ({
             )}
           </div>
 
-          {/* Bloqueo Condicional de Opciones cuando Whisper no está disponible o Python es incompatible */}
-          {!whisperDisponible && (
+          {/* Advertencia Informativa de Compatibilidad de Python */}
+          {!pythonCompatible && (
             <div
               style={{
-                backgroundColor: !pythonCompatible ? '#fef2f2' : '#fffbeb',
-                border: `1px solid ${!pythonCompatible ? '#fecaca' : '#fde68a'}`,
-                color: !pythonCompatible ? '#991b1b' : '#b45309',
+                backgroundColor: '#fef2f2',
+                border: '1px solid #fecaca',
+                color: '#991b1b',
                 padding: '0.75rem 1rem',
                 borderRadius: THEME_TOKENS.radii.sm,
                 marginBottom: '1rem',
@@ -708,12 +712,10 @@ export const ModelManagerModal: React.FC<ModelManagerModalProps> = ({
                 boxShadow: THEME_TOKENS.shadows.xs,
               }}
             >
-              <span style={{ fontSize: '1.25rem' }}>{!pythonCompatible ? '🚫' : '🔒'}</span>
+              <span style={{ fontSize: '1.25rem' }}>🚫</span>
               <div>
-                <strong>{!pythonCompatible ? 'Versión de Python Incompatible con OpenAI Whisper' : 'Opciones bloqueadas:'}</strong>{' '}
-                {!pythonCompatible
-                  ? `Se detectó Python ${estadoDeps.pythonVersion || 'antiguo'}. Whisper y PyTorch requieren como versión mínima Python ${estadoDeps.pythonMinVersion || '3.8.0'}. Instala Python 3.8 o superior para continuar.`
-                  : 'Se requiere que OpenAI Whisper esté instalado para descargar, importar o usar modelos de voz. Instala la dependencia con el botón superior para habilitar todas las funciones.'}
+                <strong>Versión de Python Incompatible con OpenAI Whisper:</strong>{' '}
+                Se detectó Python {estadoDeps.pythonVersion || 'antiguo'}. Whisper y PyTorch requieren como versión mínima Python {estadoDeps.pythonMinVersion || '3.8.0'}. Instala Python 3.8 o superior para continuar.
               </div>
             </div>
           )}
@@ -839,15 +841,15 @@ export const ModelManagerModal: React.FC<ModelManagerModalProps> = ({
               <label
                 style={{
                   backgroundColor: THEME_TOKENS.colors.surfaceBase,
-                  color: whisperDisponible ? THEME_TOKENS.colors.textPrimary : THEME_TOKENS.colors.textMuted,
-                  border: `1px solid ${whisperDisponible ? THEME_TOKENS.colors.borderStrong : THEME_TOKENS.colors.borderSubtle}`,
+                  color: THEME_TOKENS.colors.textPrimary,
+                  border: `1px solid ${THEME_TOKENS.colors.borderStrong}`,
                   padding: '0.65rem 2rem',
                   borderRadius: THEME_TOKENS.radii.sm,
                   fontWeight: 600,
                   fontSize: '0.85rem',
-                  cursor: whisperDisponible ? 'pointer' : 'not-allowed',
-                  opacity: whisperDisponible ? 1 : 0.5,
-                  pointerEvents: whisperDisponible ? 'auto' : 'none',
+                  cursor: 'pointer',
+                  opacity: 1,
+                  pointerEvents: 'auto',
                   textAlign: 'center',
                   boxShadow: THEME_TOKENS.shadows.sm,
                   transition: `all ${THEME_TOKENS.transitions.fast}`,
@@ -857,15 +859,14 @@ export const ModelManagerModal: React.FC<ModelManagerModalProps> = ({
                   gap: '0.5rem',
                   margin: '0 auto',
                 }}
-                title={!whisperDisponible ? 'Requiere instalar OpenAI Whisper' : 'Examinar backup de modelos'}
+                title="Examinar backup de modelos"
               >
-                <span>{whisperDisponible ? '💾' : '🔒'}</span>
-                {whisperDisponible ? 'Examinar Backup...' : 'Examinar Backup (Bloqueado)'}
+                <span>💾</span>
+                Examinar Backup...
                 <input
                   type="file"
                   multiple
                   accept=".pt,.bin"
-                  disabled={!whisperDisponible}
                   onChange={handleCargarBackup}
                   style={{ display: 'none' }}
                 />
@@ -1033,27 +1034,25 @@ export const ModelManagerModal: React.FC<ModelManagerModalProps> = ({
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
-                            if (!whisperDisponible) return;
                             ModelManager.setModeloActivo(m.id);
                             if (alSeleccionarModelo) alSeleccionarModelo(m.id);
                             alCerrar();
                           }}
-                          disabled={!whisperDisponible}
-                          title={!whisperDisponible ? 'Requiere instalar OpenAI Whisper' : 'Usar este modelo'}
+                          title="Usar este modelo para transcripciones"
                           style={{
-                            backgroundColor: whisperDisponible ? THEME_TOKENS.colors.surfaceDark : THEME_TOKENS.colors.borderSubtle,
-                            color: whisperDisponible ? THEME_TOKENS.colors.textOnDark : THEME_TOKENS.colors.textMuted,
+                            backgroundColor: THEME_TOKENS.colors.surfaceDark,
+                            color: THEME_TOKENS.colors.textOnDark,
                             border: 'none',
                             padding: '0.5rem 1.1rem',
                             borderRadius: THEME_TOKENS.radii.sm,
                             fontSize: '0.8rem',
-                            cursor: whisperDisponible ? 'pointer' : 'not-allowed',
-                            opacity: whisperDisponible ? 1 : 0.55,
+                            cursor: 'pointer',
+                            opacity: 1,
                             fontWeight: 600,
                             transition: `background-color ${THEME_TOKENS.transitions.fast}`,
                           }}
                         >
-                          {whisperDisponible ? '✓ Usar' : '🔒 Bloqueado'}
+                          ✓ Usar
                         </button>
                         {/* Botón de eliminar con confirmación inline */}
                         {modeloAEliminar === m.id ? (
@@ -1111,31 +1110,28 @@ export const ModelManagerModal: React.FC<ModelManagerModalProps> = ({
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
-                          if (!whisperDisponible) return;
                           handleDescargar(m.id);
                         }}
-                        disabled={!whisperDisponible || Boolean(descargandoModeloId)}
-                        title={!whisperDisponible ? 'Requiere instalar OpenAI Whisper para descargar' : 'Descargar modelo oficial'}
+                        disabled={Boolean(descargandoModeloId)}
+                        title="Descargar modelo oficial a la carpeta de caché"
                         style={{
-                          backgroundColor: (!whisperDisponible || descargandoModeloId)
+                          backgroundColor: descargandoModeloId
                             ? THEME_TOKENS.colors.borderStrong
                             : THEME_TOKENS.colors.surfaceBase,
-                          color: !whisperDisponible ? THEME_TOKENS.colors.textMuted : THEME_TOKENS.colors.textPrimary,
+                          color: THEME_TOKENS.colors.textPrimary,
                           border: `1px solid ${THEME_TOKENS.colors.borderStrong}`,
                           padding: '0.5rem 1.1rem',
                           borderRadius: THEME_TOKENS.radii.sm,
                           fontSize: '0.8rem',
-                          cursor: (!whisperDisponible || descargandoModeloId) ? 'not-allowed' : 'pointer',
-                          opacity: whisperDisponible ? 1 : 0.55,
+                          cursor: descargandoModeloId ? 'not-allowed' : 'pointer',
+                          opacity: 1,
                           fontWeight: 600,
                           transition: `all ${THEME_TOKENS.transitions.fast}`,
                         }}
                       >
                         {descargandoModeloId === m.id
                           ? '⏳ Descargando...'
-                          : whisperDisponible
-                          ? '⬇ Descargar'
-                          : '🔒 Bloqueado'}
+                          : '⬇ Descargar'}
                       </button>
                     )}
                   </div>

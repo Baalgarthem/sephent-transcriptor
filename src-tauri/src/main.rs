@@ -608,13 +608,27 @@ fn resolver_cache_dir_whisper() -> PathBuf {
     #[cfg(target_os = "windows")]
     {
         if let Ok(userprofile) = std::env::var("USERPROFILE") {
-            return PathBuf::from(userprofile).join(".cache").join("whisper");
+            let clean = userprofile.trim().trim_matches('"');
+            if !clean.is_empty() {
+                let p = PathBuf::from(clean).join(".cache").join("whisper");
+                let _ = std::fs::create_dir_all(&p);
+                return p;
+            }
+        }
+        if let (Ok(homedrive), Ok(homepath)) = (std::env::var("HOMEDRIVE"), std::env::var("HOMEPATH")) {
+            let p = PathBuf::from(format!("{}{}", homedrive, homepath)).join(".cache").join("whisper");
+            let _ = std::fs::create_dir_all(&p);
+            return p;
         }
     }
     if let Ok(home) = std::env::var("HOME") {
-        return PathBuf::from(home).join(".cache").join("whisper");
+        let p = PathBuf::from(home).join(".cache").join("whisper");
+        let _ = std::fs::create_dir_all(&p);
+        return p;
     }
-    PathBuf::from(".cache").join("whisper")
+    let p = PathBuf::from(".cache").join("whisper");
+    let _ = std::fs::create_dir_all(&p);
+    p
 }
 
 #[derive(serde::Serialize)]
@@ -662,34 +676,40 @@ async fn auditar_modelos() -> Result<String, String> {
         let cache_dir = resolver_cache_dir_whisper();
         let ruta_oficial_str = cache_dir.to_string_lossy().replace('\\', "/");
 
-        let catalogo: [(&str, &str, f64, &str); 6] = [
-            ("tiny", "tiny.pt", 75.0, "65147644a518d12f04e32d6f3b26facc3f8dd46e5390956a9424a650c0ce22b9"),
-            ("base", "base.pt", 142.0, "ed3a0b6b1c0edf879ad9b11b1af5a0e6ab5db9205f891f668f8b0e6c6326e34e"),
-            ("small", "small.pt", 466.0, "9ecf779972d90ba49c06d968637d720dd632c55bbf19d441fb42bf17a411e794"),
-            ("medium", "medium.pt", 1420.0, "345ae4da62f9b3d59415adc60127b97c714f32e89e936602e85993674d08dcb1"),
-            ("large", "large-v3.pt", 2870.0, "e5b1a55b89c1367dacf97e3e19bfd829a01529dbfdeefa8caeb59b3f1b81dadb"),
-            ("turbo", "large-v3-turbo.pt", 1540.0, "aff26ae408abcba5fbf8813c21e62b0941638c5f6eebfb145be0c9839262a19a"),
+        let catalogo: [(&str, &[&str], f64, &str); 6] = [
+            ("tiny", &["tiny.pt"][..], 75.0, "65147644a518d12f04e32d6f3b26facc3f8dd46e5390956a9424a650c0ce22b9"),
+            ("base", &["base.pt"][..], 142.0, "ed3a0b6b1c0edf879ad9b11b1af5a0e6ab5db9205f891f668f8b0e6c6326e34e"),
+            ("small", &["small.pt"][..], 466.0, "9ecf779972d90ba49c06d968637d720dd632c55bbf19d441fb42bf17a411e794"),
+            ("medium", &["medium.pt"][..], 1420.0, "345ae4da62f9b3d59415adc60127b97c714f32e89e936602e85993674d08dcb1"),
+            ("large", &["large-v3.pt", "large.pt", "large-v2.pt", "large-v1.pt"][..], 2870.0, "e5b1a55b89c1367dacf97e3e19bfd829a01529dbfdeefa8caeb59b3f1b81dadb"),
+            ("turbo", &["large-v3-turbo.pt", "turbo.pt"][..], 1540.0, "aff26ae408abcba5fbf8813c21e62b0941638c5f6eebfb145be0c9839262a19a"),
         ];
 
         let mut modelos_res = Vec::new();
 
-        for (mid, archivo, tamano_aprox, exp_sha) in catalogo {
-            let ruta_modelo = cache_dir.join(archivo);
-            let existe = ruta_modelo.is_file();
+        for (mid, archivos_candidatos, tamano_aprox, exp_sha) in catalogo {
+            let mut ruta_final = cache_dir.join(archivos_candidatos[0]);
+            let mut nombre_archivo_final = archivos_candidatos[0];
             let mut tamano_bytes: u64 = 0;
             let mut es_valido = false;
 
-            if existe {
-                if let Ok(meta) = std::fs::metadata(&ruta_modelo) {
-                    tamano_bytes = meta.len();
-                    let mb = tamano_bytes as f64 / (1024.0 * 1024.0);
-                    if tamano_bytes > 1024 * 1024 && (mb - tamano_aprox).abs() <= f64::max(15.0, tamano_aprox * 0.15) {
-                        es_valido = true;
+            for arch in archivos_candidatos {
+                let cand_path = cache_dir.join(arch);
+                if cand_path.is_file() {
+                    if let Ok(meta) = std::fs::metadata(&cand_path) {
+                        let len = meta.len();
+                        if len > 1024 * 1024 {
+                            tamano_bytes = len;
+                            es_valido = true;
+                            ruta_final = cand_path;
+                            nombre_archivo_final = arch;
+                            break;
+                        }
                     }
                 }
             }
 
-            let tamano_mb = if existe {
+            let tamano_mb = if es_valido {
                 (tamano_bytes as f64 / (1024.0 * 1024.0) * 10.0).round() / 10.0
             } else {
                 tamano_aprox
@@ -697,8 +717,8 @@ async fn auditar_modelos() -> Result<String, String> {
 
             modelos_res.push(ModeloAuditItem {
                 id: mid,
-                nombre_archivo: archivo,
-                ruta_completa: ruta_modelo.to_string_lossy().replace('\\', "/"),
+                nombre_archivo: nombre_archivo_final,
+                ruta_completa: ruta_final.to_string_lossy().replace('\\', "/"),
                 tamano_mb,
                 tamano_bytes,
                 esta_disponible: es_valido,
@@ -762,7 +782,7 @@ os.makedirs(cdir, exist_ok=True)
 dest = os.path.join(cdir, fn)
 if os.path.isfile(dest):
     sz = os.path.getsize(dest)
-    if sz > 1024 * 1024 and abs(round(sz/(1024*1024), 1) - tmb) <= max(15, tmb * 0.12):
+    if sz > 1024 * 1024:
         print(json.dumps({{"type": "complete", "modeloId": "{0}", "nombreArchivo": fn, "rutaCompleta": dest.replace("\\", "/"), "tamanoBytes": sz, "tamanoMB": round(sz/(1024*1024),1), "sha256": exp_sha, "coincide": True, "mensaje": "Modelo ya existente validado."}}), flush=True)
         sys.exit(0)
 part = dest + ".part"

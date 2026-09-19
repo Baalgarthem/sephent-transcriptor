@@ -357,7 +357,7 @@ export default function TranscriptionPanel(): React.ReactElement {
     setZonaPeligroFase(1);
   };
 
-  const handleConfirmarBorradoFinal = () => {
+  const handleConfirmarBorradoFinal = async () => {
     const palabra = textoConfirmacionPeligro.trim().toUpperCase();
     if (palabra !== 'ELIMINAR' && palabra !== 'ELIMINAR TODO') return;
 
@@ -389,8 +389,7 @@ export default function TranscriptionPanel(): React.ReactElement {
 
     if (opcionesPeligro.modelos) {
       ModelManager.limpiarModelosRegistrados();
-      actualizarEstadoModelo(model);
-      eliminados.push('Modelos OpenAI Whisper');
+      eliminados.push('Modelos OpenAI Whisper (registro restablecido)');
     } else {
       conservados.push('Modelos OpenAI Whisper (conservados intactos)');
     }
@@ -413,12 +412,11 @@ export default function TranscriptionPanel(): React.ReactElement {
     setStatusMessage('');
     setProgress(0);
 
-    // Re-sincronizar con la carpeta oficial para validar modelos que persistan en disco
-    ModelManager.sincronizarModelosEnRutaOficial().then(() => {
-      const activo = ModelManager.resolverModeloPorDefecto() as ModelKey;
-      setModel(activo);
-      actualizarEstadoModelo(activo);
-    });
+    // Re-sincronizar inmediatamente con la carpeta oficial para validar modelos que persistan en disco
+    await ModelManager.sincronizarModelosEnRutaOficial();
+    const activo = ModelManager.resolverModeloPorDefecto() as ModelKey;
+    setModel(activo);
+    actualizarEstadoModelo(activo);
 
     alert(
       `✓ Limpieza completada con éxito.\n\n` +
@@ -432,21 +430,20 @@ export default function TranscriptionPanel(): React.ReactElement {
     setTextoConfirmacionPeligro('');
   };
 
-  const handleLimpiarHistorialBD = () => {
+  const handleLimpiarHistorialBD = async () => {
     if (confirm('¿Desea vaciar el historial de transcripciones y expedientes?\n\nTus modelos de OpenAI Whisper se mantendrán intactos.')) {
       TranscriptionDatabase.limpiarTodo();
       ReviewerDatabase.limpiarTodo();
       TranscriptionGroupService.limpiarTodo();
       setHistorialBD([]);
-      ModelManager.sincronizarModelosEnRutaOficial().then(() => {
-        const activo = ModelManager.resolverModeloPorDefecto() as ModelKey;
-        setModel(activo);
-        actualizarEstadoModelo(activo);
-      });
+      await ModelManager.sincronizarModelosEnRutaOficial();
+      const activo = ModelManager.resolverModeloPorDefecto() as ModelKey;
+      setModel(activo);
+      actualizarEstadoModelo(activo);
     }
   };
 
-  const handleRestablecerTodoACero = () => {
+  const handleRestablecerTodoACero = async () => {
     if (confirm('¿Deseas restablecer la aplicación a datos cero (vaciando transcripciones y expedientes)?\n\nTus modelos descargados de OpenAI Whisper se conservarán intactos para que no tengas que descargarlos nuevamente.')) {
       TranscriptionDatabase.limpiarTodo();
       ReviewerDatabase.limpiarTodo();
@@ -455,11 +452,10 @@ export default function TranscriptionPanel(): React.ReactElement {
       setTranscriptionRecords([]);
       setStatusMessage('');
       setProgress(0);
-      ModelManager.sincronizarModelosEnRutaOficial().then(() => {
-        const activo = ModelManager.resolverModeloPorDefecto() as ModelKey;
-        setModel(activo);
-        actualizarEstadoModelo(activo);
-      });
+      await ModelManager.sincronizarModelosEnRutaOficial();
+      const activo = ModelManager.resolverModeloPorDefecto() as ModelKey;
+      setModel(activo);
+      actualizarEstadoModelo(activo);
       alert('✓ Base de datos restablecida a datos cero.\n\nTus modelos de OpenAI Whisper se han conservado intactos.');
     }
   };

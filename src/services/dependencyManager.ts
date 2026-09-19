@@ -39,7 +39,7 @@ export interface EstadoDependenciasSistema {
 export class DependencyManager {
   private static readonly CLAVE_CACHE_ESTADO = 'sephent_whisper_dependency_status_v1';
   public static readonly VERSION_MINIMA_PYTHON = '3.8.0';
-  public static readonly VERSION_MAXIMA_PYTHON = '3.13.x';
+  public static readonly VERSION_MAXIMA_PYTHON = '3.14.x';
   public static readonly VERSION_RECOMENDADA_PYTHON = '3.11 o 3.12';
 
   /**
@@ -151,7 +151,10 @@ export class DependencyManager {
 
     // Estrategia 1: Invocar comando nativo Rust de Tauri (CREATE_NO_WINDOW garantizado)
     try {
-      const rawJson = await invoke<string>('comprobar_sistema');
+      const invoker = (typeof window !== 'undefined' && (window as any).__TAURI__?.invoke)
+        ? (window as any).__TAURI__.invoke
+        : invoke;
+      const rawJson = await invoker('comprobar_sistema');
       const datos = typeof rawJson === 'string' ? JSON.parse(rawJson) : rawJson;
       const compatible = typeof datos.python_compatible === 'boolean'
         ? datos.python_compatible
@@ -283,7 +286,10 @@ export class DependencyManager {
     // Estrategia 1: Invocar comando nativo Rust de Tauri con CREATE_NO_WINDOW
     try {
       if (enProgreso) enProgreso('Descargando e instalando openai-whisper vía pip en segundo plano...');
-      await invoke('instalar_dependencia', { paquete: 'openai-whisper' });
+      const invoker = (typeof window !== 'undefined' && (window as any).__TAURI__?.invoke)
+        ? (window as any).__TAURI__.invoke
+        : invoke;
+      await invoker('instalar_dependencia', { paquete: 'openai-whisper' });
 
       if (enProgreso) enProgreso('Verificando dependencias instaladas...');
       const nuevoEstado = await this.comprobarDependencias();
