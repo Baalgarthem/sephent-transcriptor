@@ -1,0 +1,485 @@
+/* ==========================================================================
+   SISTEMA RESPONSIVE - MOBILE FIRST (LEXIS & ARCHIVE)
+   Filosofía Mobile First: Estilos base para móviles + mejoras progresivas
+   ========================================================================== */
+
+/* --- 1. CONTENEDOR RAÍZ Y ESTRUCTURA GENERAL --- */
+.app-viewport {
+  padding: 1rem 0.75rem;
+  min-height: 100vh;
+  width: 100%;
+}
+
+.app-header {
+  max-width: 920px;
+  margin: 0 auto 1.5rem auto;
+  text-align: center;
+  border-bottom: 1px solid var(--color-border-subtle);
+  padding-bottom: 1.25rem;
+}
+
+.app-title {
+  font-size: 1.85rem;
+  line-height: 1.2;
+  margin: 0 0 0.35rem 0;
+  word-break: break-word;
+}
+
+.app-subtitle {
+  font-size: 0.875rem;
+  line-height: 1.45;
+  padding: 0 0.5rem;
+}
+
+.app-main {
+  max-width: 920px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+/* --- 2. BARRA DE CONTROL SUPERIOR (RUTA OFICIAL) --- */
+.top-control-bar {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.85rem;
+  padding: 1rem 1.15rem;
+  border-radius: var(--radius-md);
+  margin-bottom: 1.5rem;
+}
+
+.top-control-btn {
+  width: 100%;
+  min-height: 44px; /* Altura táctil accesible WCAG */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* --- 3. SUPERFICIE DE TRABAJO PRINCIPAL --- */
+.work-surface {
+  padding: 1.25rem 1rem;
+  border-radius: var(--radius-md);
+}
+
+.work-surface-header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  border-bottom: 1px solid var(--color-border-subtle);
+  padding-bottom: 0.85rem;
+  margin-bottom: 1.5rem;
+}
+
+/* Formatos de salida en móvil (apilados) */
+.output-formats-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+/* Botón principal en móvil */
+.btn-primary-container {
+  display: flex;
+  justify-content: center;
+  margin: 1.75rem 0 1rem 0;
+  width: 100%;
+}
+
+.btn-primary-action {
+  width: 100%;
+  min-height: 48px; /* Fácil de pulsar en pantallas táctiles */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+/* Folios y transcripciones generadas */
+.folio-record-item {
+  padding: 0.85rem 1rem;
+}
+
+.folio-actions-container {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  margin-top: 0.65rem;
+}
+
+/* Botón de examinar centrado y contenedor */
+.examine-btn-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  margin: 0.75rem auto;
+  width: 100%;
+}
+
+.examine-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto;
+  text-align: center;
+  gap: 0.6rem;
+  padding: 0.75rem 2rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  background-color: var(--color-surface-base);
+  color: var(--color-text-primary);
+  border: 1px solid var(--color-border-strong);
+  box-shadow: var(--shadow-sm);
+  transition: all 180ms ease;
+  min-height: 44px;
+}
+
+.examine-btn:hover {
+  background-color: var(--color-bg-secondary);
+  border-color: var(--color-accent-taupe);
+  transform: translateY(-1px);
+}
+
+/* Cola de archivos para transcripción */
+.file-queue-container {
+  margin-top: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  width: 100%;
+  text-align: left;
+}
+
+.file-queue-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.785rem;
+  color: var(--color-text-secondary);
+  font-weight: 600;
+  padding-bottom: 0.35rem;
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.file-queue-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.55rem 0.85rem;
+  background-color: var(--color-surface-base);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-sm);
+  gap: 0.75rem;
+  transition: all 150ms ease;
+}
+
+.file-queue-item:hover {
+  border-color: var(--color-border-strong);
+  background-color: var(--color-surface-card);
+}
+
+.file-badge-audio {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.15rem 0.5rem;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  border-radius: var(--radius-xs);
+  background-color: #F0F4F8;
+  color: #2D4A60;
+  border: 1px solid #C4D3E0;
+  flex-shrink: 0;
+}
+
+.file-badge-video {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.15rem 0.5rem;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  border-radius: var(--radius-xs);
+  background-color: #F8F1E9;
+  color: #6E441D;
+  border: 1px solid #E2D1C1;
+  flex-shrink: 0;
+}
+
+.file-name-truncate {
+  font-size: 0.825rem;
+  font-family: var(--font-sans);
+  color: var(--color-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 230px;
+  flex: 1;
+}
+
+.file-remove-btn {
+  background: transparent;
+  border: none;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.95rem;
+  line-height: 1;
+  border-radius: var(--radius-xs);
+  transition: all 150ms ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.file-remove-btn:hover {
+  color: #8B2C2C;
+  background-color: #FBF1F1;
+}
+
+/* --- 4. MODALES Y VENTANAS FLOTANTES (MOBILE FIRST) --- */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(18, 18, 18, 0.75);
+  padding: 0.75rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  backdrop-filter: blur(3px);
+}
+
+.modal-dialog {
+  width: 100%;
+  max-width: 100%;
+  max-height: 94vh;
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.modal-body {
+  padding: 1rem;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.modal-header {
+  padding: 1rem 1.15rem;
+}
+
+.modal-footer {
+  padding: 0.85rem 1.15rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  align-items: stretch;
+}
+
+.modal-footer button {
+  width: 100%;
+  min-height: 42px;
+}
+
+/* Tarjeta de modelo en móvil */
+.model-card-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  align-items: stretch;
+  padding: 0.85rem 1rem;
+}
+
+.model-card-actions {
+  display: flex;
+  justify-content: flex-end;
+  width: 100%;
+}
+
+.model-card-actions button {
+  width: 100%;
+  min-height: 40px;
+}
+
+/* Métricas de telemetría de descarga */
+.download-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.6rem;
+}
+
+/* ==========================================================================
+   MEJORAS PROGRESIVAS PARA PANTALLAS MEDIANAS (TABLETS / PHABLETS >= 640px)
+   ========================================================================== */
+@media (min-width: 640px) {
+  .app-viewport {
+    padding: 2rem 1.25rem;
+  }
+
+  .app-header {
+    margin-bottom: 2rem;
+    padding-bottom: 1.5rem;
+  }
+
+  .app-title {
+    font-size: 2.15rem;
+  }
+
+  .top-control-bar {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.85rem 1.5rem;
+  }
+
+  .top-control-btn {
+    width: auto;
+    min-height: auto;
+  }
+
+  .work-surface {
+    padding: 1.75rem 2rem;
+    border-radius: var(--radius-lg);
+  }
+
+  .work-surface-header {
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: baseline;
+  }
+
+  .output-formats-group {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 1.5rem;
+  }
+
+  .btn-primary-action {
+    width: auto;
+    min-width: 240px;
+  }
+
+  .folio-actions-container {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 1.5rem;
+  }
+
+  .modal-dialog {
+    max-width: 880px;
+    border-radius: var(--radius-lg);
+  }
+
+  .modal-header {
+    padding: 1.25rem 2rem;
+  }
+
+  .modal-body {
+    padding: 1.5rem 2rem;
+  }
+
+  .modal-footer {
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1rem 2rem;
+  }
+
+  .modal-footer button {
+    width: auto;
+  }
+
+  .model-card-item {
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.85rem 1.25rem;
+  }
+
+  .model-card-actions {
+    width: auto;
+  }
+
+  .model-card-actions button {
+    width: auto;
+  }
+
+  .download-metrics-grid {
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0.75rem;
+  }
+}
+
+/* ==========================================================================
+   MEJORAS PROGRESIVAS PARA ESCRITORIO Y PANTALLAS GRANDES (>= 1024px)
+   ========================================================================== */
+@media (min-width: 1024px) {
+  .app-viewport {
+    padding: 2rem 1.5rem;
+  }
+
+  .app-header {
+    max-width: 1180px;
+    margin-bottom: 2rem;
+    padding-bottom: 1.5rem;
+  }
+
+  .app-main {
+    max-width: 1180px;
+  }
+
+  .app-title {
+    font-size: 2.2rem;
+  }
+
+  .work-surface {
+    padding: 2rem 2.25rem;
+  }
+
+  .download-metrics-grid {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+
+@media (min-width: 1440px) {
+  .app-header,
+  .app-main {
+    max-width: 1400px;
+  }
+
+  .modal-dialog {
+    max-width: 960px;
+  }
+
+  .work-surface {
+    padding: 2.25rem 2.75rem;
+  }
+}
+
+@media (min-width: 1920px) {
+  .app-header,
+  .app-main {
+    max-width: 1620px;
+  }
+
+  .modal-dialog {
+    max-width: 1080px;
+  }
+
+  .work-surface {
+    padding: 2.5rem 3rem;
+  }
+}
+
+

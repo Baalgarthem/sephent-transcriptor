@@ -1,0 +1,73 @@
+/* ==========================================================================
+   SEPHENT TRANSCRIPTOR - SISTEMA DE DISEÑO: LEXIS & ARCHIVE
+   Estética ejecutiva, sobria, jurídica y editorial
+   ========================================================================== */
+
+:root {
+  /* --- Superficies y Fondos Principales --- */
+  --color-bg-canvas: #FBFBF9;             /* Fondo general marfil pergamino */
+  --color-bg-secondary: #F3F3EF;          /* Fondo secundario gris lino claro */
+  --color-surface-base: #FFFFFF;          /* Superficie de lectura blanco puro */
+  --color-surface-elevated: #FFFFFF;      /* Modales y menús flotantes */
+  --color-surface-dark: #121212;          /* Negro obsidiana ejecutiva */
+  --color-surface-dark-subtle: #1C1C1A;   /* Carbón mate secundario */
+  --color-surface-card: #FAF9F5;          /* Superficie de tarjeta documental */
+
+  /* --- Textos y Tipografía --- */
+  --color-text-primary: #141412;          /* Tinta negra profunda */
+  --color-text-secondary: #595852;        /* Gris grafito cálido */
+  --color-text-muted: #8C8B82;            /* Ceniza suave / metadatos */
+  --color-text-on-dark: #F5F5F0;          /* Blanco roto seda para fondos oscuros */
+  --color-text-on-dark-muted: #A8A79E;    /* Gris mineral claro sobre fondo oscuro */
+
+  /* --- Bordes y Separadores --- */
+  --color-border-subtle: #E8E7E1;         /* Borde hueso tenue (separadores de hilo) */
+  --color-border-strong: #D1D0C7;         /* Borde arena medio (controles e inputs) */
+  --color-border-dark: #2D2D2A;           /* Borde carbón fino sobre superficies oscuras */
+  --color-border-focus: #B5A795;          /* Borde taupe para foco activo */
+
+  /* --- Acentos Nobles --- */
+  --color-accent-primary: #242320;        /* Negro ejecutivo para acciones principales */
+  --color-accent-hover: #383733;          /* Carbón profundo para hover principal */
+  --color-accent-taupe: #B5A795;          /* Taupe / arena noble para selección */
+  --color-accent-taupe-bg: #F7F5F0;       /* Velo arena claro para estados hover/activos */
+
+  /* --- Estados Funcionales (Uso sobrio) --- */
+  --color-state-success: #2D5A3D;         /* Verde oliva bosque (Disponible) */
+  --color-state-success-bg: #F1F6F2;      /* Fondo tenue de éxito */
+  --color-state-success-border: #C8DDCF;  /* Borde tenue de éxito */
+
+  --color-state-warning: #8C5A2B;         /* Ámbar siena tostado (No descargado) */
+  --color-state-warning-bg: #FAF4ED;      /* Fondo tenue de advertencia */
+  --color-state-warning-border: #E8D3BF;  /* Borde tenue de advertencia */
+
+  --color-state-error: #8B2C2C;           /* Rojo carmín granate */
+  --color-state-error-bg: #FBF1F1;        /* Fondo tenue de error */
+  --color-state-error-border: #E5C3C3;    /* Borde tenue de error */
+
+  --color-state-info: #3A4B59;            /* Pizarra azulado oscuro */
+  --color-state-info-bg: #F2F5F8;         /* Fondo tenue informativo */
+  --color-state-info-border: #C9D5E0;     /* Borde tenue informativo */
+
+  /* --- Tipografías --- */
+  --font-serif: "Newsreader", Georgia, "Times New Roman", "Baskerville", "Palatino Linotype", serif;
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Inter", -apple-system, sans-serif;
+  --font-mono: "Cascadia Code", "Consolas", "Courier New", monospace;
+
+  /* --- Radios de Curvatura (Moderados y Formales) --- */
+  --radius-xs: 2px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-pill: 9999px;
+
+  /* --- Sombras (Discretas y Rasantes) --- */
+  --shadow-sm: 0 1px 2px rgba(20, 20, 18, 0.04);
+  --shadow-md: 0 4px 12px rgba(20, 20, 18, 0.06);
+  --shadow-lg: 0 16px 32px -8px rgba(20, 20, 18, 0.12);
+  --shadow-modal: 0 25px 50px -12px rgba(0, 0, 0, 0.35);
+
+  /* --- Transiciones --- */
+  --transition-fast: 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-normal: 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}

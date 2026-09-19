@@ -1,0 +1,61 @@
+/* ==========================================================================
+   ESTILOS GLOBALES Y NORMALIZACIÓN EDITORIAL
+   ========================================================================== */
+
+@import './tokens.css';
+@import './responsive.css';
+
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background-color: var(--color-bg-canvas);
+  color: var(--color-text-primary);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Encabezados editoriales */
+h1, h2, h3, h4, .font-serif {
+  font-family: var(--font-serif);
+  color: var(--color-text-primary);
+  letter-spacing: -0.015em;
+  font-weight: 600;
+}
+
+/* Tipografía de código / hashes / rutas */
+code, pre, .font-mono {
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+}
+
+/* Scrollbar discreto y sobrio */
+::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--color-bg-secondary);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-border-strong);
+  border-radius: var(--radius-xs);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-muted);
+}
+
+/* Focus accesible y sobrio */
+:focus-visible {
+  outline: 2px solid var(--color-border-focus);
+  outline-offset: 1px;
+}
