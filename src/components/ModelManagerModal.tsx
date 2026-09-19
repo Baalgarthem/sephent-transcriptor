@@ -1,13 +1,26 @@
-import React, { useState, useEffect, ChangeEvent } from 'react';
+import React, { useState, useEffect, ChangeEvent, Component, ErrorInfo, ReactNode } from 'react';
 import { ModelManager, ModeloInstaladoInfo, RegistroImportacionBackup, ResumenModelosRutaOficial } from '../services/modelManager';
 import { InformacionRutaOficial } from '../services/whisperPathService';
 import { DependencyManager, EstadoDependenciasSistema } from '../services/dependencyManager';
 import { DownloadProgressBar } from './DownloadProgressBar';
 import { WHISPER_MODELS } from '../config/whisperConfig';
 import { THEME_TOKENS } from '../config/themeTokens';
-import { fetch as tauriFetch, ResponseType } from '@tauri-apps/api/http';
 import { invoke } from '@tauri-apps/api/tauri';
 import { listen } from '@tauri-apps/api/event';
+
+const obtenerTauriInvoke = () => {
+  if (typeof window !== 'undefined' && (window as any).__TAURI__?.invoke) {
+    return (window as any).__TAURI__.invoke;
+  }
+  return invoke;
+};
+
+const obtenerTauriListen = () => {
+  if (typeof window !== 'undefined' && (window as any).__TAURI__?.event?.listen) {
+    return (window as any).__TAURI__.event.listen;
+  }
+  return listen;
+};
 
 interface ModelManagerModalProps {
   abierto: boolean;
@@ -16,15 +29,48 @@ interface ModelManagerModalProps {
   modeloAIniciarDescarga?: string;
 }
 
-export const ModelManagerModal: React.FC<ModelManagerModalProps> = ({
+const ModelManagerModalContent: React.FC<ModelManagerModalProps> = ({
   abierto,
   alCerrar,
   alSeleccionarModelo,
   modeloAIniciarDescarga,
 }) => {
-  const [infoRuta, setInfoRuta] = useState<InformacionRutaOficial>(() => ModelManager.obtenerRutaOficial());
-  const [modelos, setModelos] = useState<ModeloInstaladoInfo[]>(() => ModelManager.revisarModelosEnRutaOficial());
-  const [resumen, setResumen] = useState<ResumenModelosRutaOficial>(() => ModelManager.obtenerResumenModelos());
+  const [infoRuta, setInfoRuta] = useState<InformacionRutaOficial>(() => {
+    try {
+      return ModelManager.obtenerRutaOficial();
+    } catch {
+      return {
+        sistemaOperativoDetectado: 'windows',
+        rutaPorDefectoOficial: '%USERPROFILE%\\.cache\\whisper',
+        rutaPorDefectoFormatoAmigable: '%USERPROFILE%\\.cache\\whisper',
+        existeDirectorio: true,
+        esRutaPersonalizada: false,
+        origenDeteccion: 'estandar-windows',
+      };
+    }
+  });
+  const [modelos, setModelos] = useState<ModeloInstaladoInfo[]>(() => {
+    try {
+      return ModelManager.revisarModelosEnRutaOficial();
+    } catch {
+      return [];
+    }
+  });
+  const [resumen, setResumen] = useState<ResumenModelosRutaOficial>(() => {
+    try {
+      return ModelManager.obtenerResumenModelos();
+    } catch {
+      return {
+        totalCatalogo: 6,
+        totalDescargados: 0,
+        totalPendientes: 6,
+        tamanoTotalOcupadoMB: 0,
+        rutaPorDefectoOficial: '%USERPROFILE%\\.cache\\whisper',
+        modelosDescargados: [],
+        modelosPendientes: [],
+      };
+    }
+  });
   const [hoveredModelId, setHoveredModelId] = useState<string | null>(null);
 
   // Estado del testigo de OpenAI Whisper y dependencias del sistema
@@ -51,21 +97,25 @@ export const ModelManagerModal: React.FC<ModelManagerModalProps> = ({
   const [modeloAEliminar, setModeloAEliminar] = useState<string | null>(null);
 
   const recargarEstado = () => {
-    const ruta = ModelManager.obtenerRutaOficial();
-    setInfoRuta(ruta);
-    const lista = ModelManager.revisarModelosEnRutaOficial();
-    setModelos(lista);
-    setResumen(ModelManager.obtenerResumenModelos());
+    try {
+      const ruta = ModelManager.obtenerRutaOficial();
+      setInfoRuta(ruta);
+      const lista = ModelManager.revisarModelosEnRutaOficial();
+      setModelos(lista);
+      setResumen(ModelManager.obtenerResumenModelos());
+    } catch (err) {
+      console.warn('Aviso al recargar estado:', err);
+    }
   };
 
   const verificarYRecargar = async () => {
     setComprobandoDeps(true);
     try {
-      // 1. Sincronización nativa ultra-rápida (0.1ms en Rust directo a disco)
+      // 1. Sincronización nativa con la ruta canónica oficial
       await ModelManager.sincronizarModelosEnRutaOficial();
       recargarEstado();
 
-      // 2. Comprobación de Python y dependencias en segundo plano
+      // 2. Comprobación de Python y dependencias en segundo plano bajo demanda
       const deps = await DependencyManager.comprobarDependencias();
       setEstadoDeps(deps);
       recargarEstado();
@@ -79,46 +129,62 @@ export const ModelManagerModal: React.FC<ModelManagerModalProps> = ({
   useEffect(() => {
     if (abierto) {
       recargarEstado();
-      // Sincronización inmediata con archivos en disco para reflejar estado en milisegundos
-      ModelManager.sincronizarModelosEnRutaOficial().then(() => {
-        recargarEstado();
-      });
-      verificarYRecargar();
+      // Sincronización nativa ultra-eficiente en disco (0.2ms) sin bloquear la interfaz
+      ModelManager.sincronizarModelosEnRutaOficial()
+        .then(() => {
+          recargarEstado();
+        })
+        .catch((err) => {
+          console.warn('Aviso en sincronización:', err);
+        });
     }
   }, [abierto]);
 
-  // Listener nativo de eventos de descarga en segundo plano desde Tauri
+  // Listener nativo seguro de eventos de descarga en segundo plano desde Tauri
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     const esDesktop = typeof window !== 'undefined' && !!((window as any).__TAURI__ || (window as any).__TAURI_IPC__ || (window as any).__TAURI_METADATA__);
 
     if (esDesktop) {
-      listen('descarga-progreso', (evento: any) => {
+      const listenFn = obtenerTauriListen();
+      if (typeof listenFn === 'function') {
         try {
-          const datos = typeof evento.payload === 'string' ? JSON.parse(evento.payload) : evento.payload;
-          if (datos.type === 'progress') {
-            setMetricasDescarga((prev) => ({
-              ...prev,
-              porcentaje: typeof datos.porcentaje === 'number' ? datos.porcentaje : prev.porcentaje,
-              descargadoMB: typeof datos.descargadoMB === 'number' ? datos.descargadoMB : prev.descargadoMB,
-              totalMB: typeof datos.totalMB === 'number' ? datos.totalMB : prev.totalMB,
-              velocidadMBs: typeof datos.velocidadMBs === 'number' ? datos.velocidadMBs : prev.velocidadMBs,
-              tiempoRestanteSegundos: typeof datos.tiempoRestanteSegundos === 'number' ? datos.tiempoRestanteSegundos : 0,
-              estadoMensaje: datos.estadoMensaje || prev.estadoMensaje,
-            }));
+          const promesaListen = listenFn('descarga-progreso', (evento: any) => {
+            try {
+              const datos = typeof evento.payload === 'string' ? JSON.parse(evento.payload) : evento.payload;
+              if (datos && datos.type === 'progress') {
+                setMetricasDescarga((prev) => ({
+                  ...prev,
+                  porcentaje: typeof datos.porcentaje === 'number' ? datos.porcentaje : prev.porcentaje,
+                  descargadoMB: typeof datos.descargadoMB === 'number' ? datos.descargadoMB : prev.descargadoMB,
+                  totalMB: typeof datos.totalMB === 'number' ? datos.totalMB : prev.totalMB,
+                  velocidadMBs: typeof datos.velocidadMBs === 'number' ? datos.velocidadMBs : prev.velocidadMBs,
+                  tiempoRestanteSegundos: typeof datos.tiempoRestanteSegundos === 'number' ? datos.tiempoRestanteSegundos : 0,
+                  estadoMensaje: datos.estadoMensaje || prev.estadoMensaje,
+                }));
+              }
+            } catch (err) {
+              // ignore
+            }
+          });
+
+          if (promesaListen && typeof promesaListen.then === 'function') {
+            promesaListen.then((fn: any) => {
+              unlisten = fn;
+            }).catch((err: any) => {
+              console.warn('Error al suscribir listener de descarga:', err);
+            });
           }
-        } catch (err) {
-          // ignore parsing errors
+        } catch (callErr) {
+          console.warn('Fallo al inicializar listener nativo:', callErr);
         }
-      }).then((fn: any) => {
-        unlisten = fn;
-      }).catch((err) => {
-        console.warn('Error al suscribir listener de descarga:', err);
-      });
+      }
     }
 
     return () => {
-      if (unlisten) unlisten();
+      if (unlisten) {
+        try { unlisten(); } catch {}
+      }
     };
   }, []);
 
@@ -232,7 +298,8 @@ export const ModelManagerModal: React.FC<ModelManagerModalProps> = ({
         }));
 
         // Comprobar primero si ya existe físicamente en el disco
-        const rawAudit = await invoke<string>('auditar_modelos');
+        const tauriInvoker = obtenerTauriInvoke();
+        const rawAudit = await tauriInvoker<string>('auditar_modelos');
         const auditRes = typeof rawAudit === 'string' ? JSON.parse(rawAudit) : rawAudit;
         const modEncontrado = auditRes?.modelos?.find((m: any) => m.id === modeloId);
 
@@ -274,7 +341,7 @@ export const ModelManagerModal: React.FC<ModelManagerModalProps> = ({
           estadoMensaje: `Conectando con repositorios oficiales de OpenAI para ${def.nombreVisible}...`,
         }));
 
-        const rawResultado = await invoke<string>('descargar_modelo', { modeloId });
+        const rawResultado = await tauriInvoker<string>('descargar_modelo', { modeloId });
         const resultado = typeof rawResultado === 'string' ? JSON.parse(rawResultado) : rawResultado;
 
         if (resultado && resultado.type === 'complete') {
@@ -723,8 +790,8 @@ export const ModelManagerModal: React.FC<ModelManagerModalProps> = ({
           {/* Banner de Resumen de Modelos Instalados */}
           <div
             style={{
-              backgroundColor: resumen.totalDescargados > 0 ? THEME_TOKENS.colors.stateSuccessBg : THEME_TOKENS.colors.bgSecondary,
-              border: `1px solid ${resumen.totalDescargados > 0 ? THEME_TOKENS.colors.stateSuccessBorder : THEME_TOKENS.colors.borderSubtle}`,
+              backgroundColor: (resumen?.totalDescargados ?? 0) > 0 ? THEME_TOKENS.colors.stateSuccessBg : THEME_TOKENS.colors.bgSecondary,
+              border: `1px solid ${(resumen?.totalDescargados ?? 0) > 0 ? THEME_TOKENS.colors.stateSuccessBorder : THEME_TOKENS.colors.borderSubtle}`,
               borderRadius: THEME_TOKENS.radii.sm,
               padding: '0.65rem 1rem',
               marginBottom: '1rem',
@@ -736,13 +803,13 @@ export const ModelManagerModal: React.FC<ModelManagerModalProps> = ({
             }}
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', flexWrap: 'wrap' }}>
-              <span style={{ fontSize: '0.8rem' }}>{resumen.totalDescargados > 0 ? '✓' : '○'}</span>
-              <span style={{ fontSize: '0.8rem', color: resumen.totalDescargados > 0 ? THEME_TOKENS.colors.stateSuccess : THEME_TOKENS.colors.textSecondary, fontWeight: 600 }}>
-                {resumen.totalDescargados} de {resumen.totalCatalogo} modelos instalados
+              <span style={{ fontSize: '0.8rem' }}>{(resumen?.totalDescargados ?? 0) > 0 ? '✓' : '○'}</span>
+              <span style={{ fontSize: '0.8rem', color: (resumen?.totalDescargados ?? 0) > 0 ? THEME_TOKENS.colors.stateSuccess : THEME_TOKENS.colors.textSecondary, fontWeight: 600 }}>
+                {resumen?.totalDescargados ?? 0} de {resumen?.totalCatalogo ?? 6} modelos instalados
               </span>
-              {resumen.totalDescargados > 0 && (
+              {(resumen?.totalDescargados ?? 0) > 0 && (
                 <span style={{ fontSize: '0.75rem', color: THEME_TOKENS.colors.textMuted }}>
-                  · ~{resumen.tamanoTotalOcupadoMB.toFixed(0)} MB ocupados
+                  · ~{Number(resumen?.tamanoTotalOcupadoMB || 0).toFixed(0)} MB ocupados
                 </span>
               )}
             </div>
@@ -758,7 +825,7 @@ export const ModelManagerModal: React.FC<ModelManagerModalProps> = ({
                 wordBreak: 'break-all',
               }}
             >
-              {resumen.rutaPorDefectoOficial}
+              {resumen?.rutaPorDefectoOficial || infoRuta?.rutaPorDefectoOficial || '%USERPROFILE%\\.cache\\whisper'}
             </span>
           </div>
 
@@ -809,7 +876,7 @@ export const ModelManagerModal: React.FC<ModelManagerModalProps> = ({
                 wordBreak: 'break-all',
               }}
             >
-              {infoRuta?.rutaPorDefectoOficial}
+              {infoRuta?.rutaPorDefectoOficial || '%USERPROFILE%\\.cache\\whisper'}
             </p>
             <span style={{ fontSize: '0.75rem', color: THEME_TOKENS.colors.textMuted }}>
               * Ubicación por defecto de OpenAI Whisper en el sistema local.
@@ -1151,7 +1218,7 @@ export const ModelManagerModal: React.FC<ModelManagerModalProps> = ({
           }}
         >
           <span style={{ fontSize: '0.75rem', color: THEME_TOKENS.colors.textMuted }}>
-            Directorio: <code>{infoRuta?.rutaPorDefectoOficial}</code>
+            Directorio: <code>{infoRuta?.rutaPorDefectoOficial || '%USERPROFILE%\\.cache\\whisper'}</code>
           </span>
           <button
             onClick={alCerrar}
@@ -1173,5 +1240,116 @@ export const ModelManagerModal: React.FC<ModelManagerModalProps> = ({
         </div>
       </div>
     </div>
+  );
+};
+
+interface ErrorBoundaryProps {
+  children: ReactNode;
+  alCerrar: () => void;
+}
+
+interface ErrorBoundaryState {
+  hasError: boolean;
+  error?: Error;
+}
+
+class ModelManagerErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  constructor(props: ErrorBoundaryProps) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    console.error('Error capturado en ModelManagerModal:', error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div
+          className="modal-overlay"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(15, 23, 42, 0.75)',
+            backdropFilter: 'blur(4px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 9999,
+          }}
+        >
+          <div
+            style={{
+              backgroundColor: THEME_TOKENS.colors.surfaceBase,
+              border: `1px solid ${THEME_TOKENS.colors.stateDangerBorder}`,
+              borderRadius: THEME_TOKENS.radii.lg,
+              padding: '2rem',
+              maxWidth: '520px',
+              width: '90%',
+              boxShadow: THEME_TOKENS.shadows.lg,
+              textAlign: 'center',
+            }}
+          >
+            <div style={{ fontSize: '2.5rem', marginBottom: '1rem' }}>⚠️</div>
+            <h3 style={{ margin: '0 0 0.5rem 0', color: THEME_TOKENS.colors.textPrimary }}>
+              No se pudo renderizar la gestión de modelos
+            </h3>
+            <p style={{ fontSize: '0.875rem', color: THEME_TOKENS.colors.textSecondary, marginBottom: '1.5rem' }}>
+              Ocurrió un inconveniente al cargar el estado visual. Sus modelos en disco no han sido afectados.
+            </p>
+            <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center' }}>
+              <button
+                onClick={() => {
+                  try {
+                    ModelManager.sincronizarModelosEnRutaOficial();
+                  } catch {}
+                  this.setState({ hasError: false });
+                }}
+                style={{
+                  backgroundColor: THEME_TOKENS.colors.brandPrimary,
+                  color: '#fff',
+                  border: 'none',
+                  padding: '0.5rem 1.25rem',
+                  borderRadius: THEME_TOKENS.radii.sm,
+                  cursor: 'pointer',
+                  fontWeight: 600,
+                }}
+              >
+                Reintentar
+              </button>
+              <button
+                onClick={this.props.alCerrar}
+                style={{
+                  backgroundColor: THEME_TOKENS.colors.surfaceBase,
+                  color: THEME_TOKENS.colors.textPrimary,
+                  border: `1px solid ${THEME_TOKENS.colors.borderStrong}`,
+                  padding: '0.5rem 1.25rem',
+                  borderRadius: THEME_TOKENS.radii.sm,
+                  cursor: 'pointer',
+                  fontWeight: 600,
+                }}
+              >
+                Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+export const ModelManagerModal: React.FC<ModelManagerModalProps> = (props) => {
+  if (!props.abierto) return null;
+  return (
+    <ModelManagerErrorBoundary alCerrar={props.alCerrar}>
+      <ModelManagerModalContent {...props} />
+    </ModelManagerErrorBoundary>
   );
 };

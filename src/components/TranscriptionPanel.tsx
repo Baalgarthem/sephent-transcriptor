@@ -28,7 +28,13 @@ export default function TranscriptionPanel(): React.ReactElement {
   const configInicial = UserSettingsService.obtenerConfiguracion();
 
   const [files, setFiles] = useState<File[]>([]);
-  const [model, setModel] = useState<ModelKey>(configInicial.modelo as ModelKey);
+  const [model, setModel] = useState<ModelKey>(() => {
+    try {
+      const def = ModelManager.resolverModeloPorDefecto();
+      if (def) return def as ModelKey;
+    } catch {}
+    return (configInicial.modelo as ModelKey) || 'base';
+  });
   const [language, setLanguage] = useState<LanguageOption>(configInicial.idioma as LanguageOption);
   const [outputTxt, setOutputTxt] = useState(configInicial.outputTxt);
   const [outputSrt, setOutputSrt] = useState(configInicial.outputSrt);
@@ -57,7 +63,14 @@ export default function TranscriptionPanel(): React.ReactElement {
   const [audioUrlParaRevisar, setAudioUrlParaRevisar] = useState<string | undefined>(undefined);
   const [segmentosParaRevisar, setSegmentosParaRevisar] = useState<any[] | undefined>(undefined);
   const [rutaOficialTexto, setRutaOficialTexto] = useState('');
-  const [modeloDisponibleLocalmente, setModeloDisponibleLocalmente] = useState(false);
+  const [modeloDisponibleLocalmente, setModeloDisponibleLocalmente] = useState<boolean>(() => {
+    try {
+      const def = ModelManager.resolverModeloPorDefecto();
+      return ModelManager.isModelActive(def);
+    } catch {
+      return false;
+    }
+  });
   const [modeloParaDescargaDirecta, setModeloParaDescargaDirecta] = useState<string | undefined>(undefined);
 
   const handleToggleSeleccionTrx = (id: string) => {
@@ -173,7 +186,7 @@ export default function TranscriptionPanel(): React.ReactElement {
   // Actualizar estado de la ruta oficial y disponibilidad del modelo seleccionado
   const actualizarEstadoModelo = (modeloAExaminar: ModelKey = model) => {
     const infoRuta = ModelManager.obtenerRutaOficial();
-    setRutaOficialTexto(infoRuta.rutaPorDefectoOficial);
+    setRutaOficialTexto(infoRuta.rutaPorDefectoOficial || '%USERPROFILE%\\.cache\\whisper');
     const estaDisp = ModelManager.isModelActive(modeloAExaminar);
     setModeloDisponibleLocalmente(estaDisp);
     return estaDisp;

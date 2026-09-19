@@ -258,7 +258,10 @@ export class ModelManager {
       const invoker = (typeof window !== 'undefined' && (window as any).__TAURI__?.invoke)
         ? (window as any).__TAURI__.invoke
         : invoke;
-      const rawJson = await invoker('auditar_modelos');
+      const infoRutaActual = this.obtenerRutaOficial();
+      const rawJson = await invoker('auditar_modelos', {
+        rutaPersonalizada: infoRutaActual.esRutaPersonalizada ? infoRutaActual.rutaPorDefectoOficial : null
+      });
       const resultado = typeof rawJson === 'string' ? JSON.parse(rawJson) : rawJson;
       if (resultado && resultado.rutaOficial) {
         WhisperPathService.actualizarRutaDetectada(resultado.rutaOficial);
@@ -270,7 +273,8 @@ export class ModelManager {
               m.id,
               'ruta-oficial',
               m.hashSha256 || undefined,
-              m.tamanoBytes || undefined
+              m.tamanoBytes || undefined,
+              false // No sobreescribir el modelo seleccionado por el usuario en sincronización pasiva
             );
           } else {
             // Si el archivo ya no existe físicamente en disco y su origen era ruta-oficial, desregistrarlo
@@ -295,7 +299,8 @@ export class ModelManager {
     modeloId: string,
     origen: 'ruta-oficial' | 'descarga' | 'copia-seguridad',
     hashSha256?: string,
-    tamanoBytes?: number
+    tamanoBytes?: number,
+    marcarComoActivo: boolean = false
   ): ModeloInstaladoInfo {
     const def = WHISPER_MODELS[modeloId];
     if (!def) {
@@ -339,7 +344,9 @@ export class ModelManager {
       }
     }
 
-    this.registrarUltimoModeloDescargado(def.id);
+    if (marcarComoActivo) {
+      this.registrarUltimoModeloDescargado(def.id);
+    }
 
     return info;
   }
@@ -388,14 +395,14 @@ export class ModelManager {
     const todos = this.revisarModelosEnRutaOficial();
     const descargados = todos.filter((m) => m.estaDisponible);
     const pendientes = todos.filter((m) => !m.estaDisponible);
-    const tamanoTotalOcupadoMB = descargados.reduce((acum, m) => acum + m.tamanoMB, 0);
+    const tamanoTotalOcupadoMB = descargados.reduce((acum, m) => acum + (Number(m.tamanoMB) || 0), 0);
     const infoRuta = this.obtenerRutaOficial();
 
     return {
       totalCatalogo: todos.length,
       totalDescargados: descargados.length,
       totalPendientes: pendientes.length,
-      tamanoTotalOcupadoMB,
+      tamanoTotalOcupadoMB: Number.isFinite(tamanoTotalOcupadoMB) ? tamanoTotalOcupadoMB : 0,
       rutaPorDefectoOficial: infoRuta.rutaPorDefectoOficial,
       modelosDescargados: descargados,
       modelosPendientes: pendientes,
