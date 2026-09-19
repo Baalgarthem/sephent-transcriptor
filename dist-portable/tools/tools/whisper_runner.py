@@ -733,6 +733,41 @@ def transcribir(file_path: str, model_name: str, language: str,
     print(f"[whisper_runner] ETAPA 1/4: Cargando modelo: {resolved_model} en {device_info}", file=sys.stderr, flush=True)
     model = whisper.load_model(resolved_model, device=device)
 
+    # ── Candado de Idioma (v0.2.2) ────────────────────────────────────────────
+    # Si el usuario eligió un idioma específico pero el audio está en otro idioma,
+    # esto corrige la elección automáticamente usando la detección real de Whisper.
+    # Umbral de confianza: >= 55% para sobrescribir la elección del usuario.
+    # En modo "auto" Whisper detecta el idioma durante la transcripción normalmente.
+    # ─────────────────────────────────────────────────────────────────────────
+    language_usado = language  # Por defecto, respetar la elección del usuario
+    if language and language.lower() not in ("auto", ""):
+        try:
+            audio_muestra = whisper.load_audio(file_path)
+            audio_muestra = whisper.pad_or_trim(audio_muestra)
+            n_mels = model.dims.n_mels
+            mel_muestra = whisper.log_mel_spectrogram(audio_muestra, n_mels=n_mels).to(model.device)
+            _, probs_idioma = model.detect_language(mel_muestra)
+            idioma_detectado = max(probs_idioma, key=probs_idioma.get)
+            confianza = float(probs_idioma[idioma_detectado])
+            # Normalizar: el usuario puede escribir "español", "es", "ES", "es-MX" → "es"
+            codigo_usuario = language.lower().split("-")[0].split("_")[0][:2]
+            if idioma_detectado != codigo_usuario and confianza >= 0.55:
+                print(
+                    f"[whisper_runner] Candado de idioma: usuario='{language}', "
+                    f"audio='{idioma_detectado}' ({confianza:.0%} confianza). "
+                    f"Usando idioma del audio para mayor precisión.",
+                    file=sys.stderr, flush=True
+                )
+                language_usado = idioma_detectado
+            elif idioma_detectado != codigo_usuario:
+                print(
+                    f"[whisper_runner] Idioma del audio incierto ('{idioma_detectado}', {confianza:.0%}). "
+                    f"Respetando elección del usuario: '{language}'.",
+                    file=sys.stderr, flush=True
+                )
+        except Exception as e_lang:
+            print(f"[whisper_runner] Aviso candado de idioma: {e_lang}", file=sys.stderr, flush=True)
+
     # Parámetros de transcripción optimizados
     kwargs = {
         "word_timestamps": True,
@@ -745,8 +780,8 @@ def transcribir(file_path: str, model_name: str, language: str,
         "fp16": fp16,
         "condition_on_previous_text": True,
     }
-    if language and language.lower() not in ("auto", ""):
-        kwargs["language"] = language
+    if language_usado and language_usado.lower() not in ("auto", ""):
+        kwargs["language"] = language_usado
 
     print(f"[whisper_runner] ETAPA 2/4: Transcribiendo audio: {os.path.basename(file_path)}", file=sys.stderr, flush=True)
     real_stdout = sys.stdout
@@ -759,7 +794,7 @@ def transcribir(file_path: str, model_name: str, language: str,
         sys.stdout = real_stdout
 
     segments_raw = result.get("segments", [])
-    detected_language = result.get("language", language)
+    detected_language = result.get("language", language_usado)
     duration = segments_raw[-1]["end"] if segments_raw else 0.0
 
     print(f"[whisper_runner] Segmentos: {len(segments_raw)}, idioma: {detected_language}", file=sys.stderr, flush=True)
