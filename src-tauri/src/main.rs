@@ -1049,10 +1049,23 @@ async fn transcribir_audio_whisper(
             return Err(format!("El proceso de Whisper finalizó con código {:?}. Salida: {}", status.code(), salida_limpia));
         }
 
-        if let Ok(val) = serde_json::from_str::<serde_json::Value>(salida_limpia) {
+        // Extraer el bloque JSON de forma robusta en caso de que existan textos previos o posteriores en stdout
+        let json_extraido = if let (Some(inicio), Some(fin)) = (salida_limpia.find('{'), salida_limpia.rfind('}')) {
+            if fin >= inicio {
+                &salida_limpia[inicio..=fin]
+            } else {
+                salida_limpia
+            }
+        } else {
+            salida_limpia
+        };
+
+        if let Ok(val) = serde_json::from_str::<serde_json::Value>(json_extraido) {
             if let Some(err_msg) = val.get("error").and_then(|e| e.as_str()) {
                 return Err(format!("Error en motor Whisper: {}", err_msg));
             }
+        } else {
+            return Err(format!("Respuesta inválida del motor de transcripción (no se pudo parsear JSON). Salida: {}", salida_limpia));
         }
 
         let _ = window.emit("transcripcion-progreso", serde_json::json!({
@@ -1060,7 +1073,7 @@ async fn transcribir_audio_whisper(
             "mensaje": "Transcripción completada con éxito."
         }));
 
-        Ok(salida_limpia.to_string())
+        Ok(json_extraido.to_string())
     })
     .await
     .map_err(|e| format!("Error en tarea asíncrona de transcripción: {}", e))?

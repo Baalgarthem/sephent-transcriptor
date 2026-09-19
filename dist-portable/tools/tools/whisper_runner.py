@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 """
 whisper_runner.py — Motor de Transcripcion Real con OpenAI Whisper
 
@@ -23,6 +23,10 @@ import json
 import argparse
 import math
 import os
+import warnings
+
+# Suprimir advertencias de librerías para garantizar que no contaminen la salida
+warnings.filterwarnings("ignore")
 
 # ---------------------------------------------------------------------------
 # Umbrales de diarizacion por energia (ajustables sin tocar logica)
@@ -114,12 +118,19 @@ def transcribir(file_path: str, model_name: str, language: str, num_speakers: in
     print(f"[whisper_runner] Cargando modelo: {resolved_model}", file=sys.stderr)
     model = whisper.load_model(resolved_model)
 
-    kwargs = {"word_timestamps": False, "verbose": False}
+    kwargs = {"word_timestamps": False, "verbose": None}
     if language and language.lower() not in ("auto", ""):
         kwargs["language"] = language
 
     print(f"[whisper_runner] Transcribiendo: {os.path.basename(file_path)}", file=sys.stderr)
-    result = model.transcribe(file_path, **kwargs)
+    real_stdout = sys.stdout
+    try:
+        # Redirigir stdout a stderr durante la inferencia para que ningún mensaje
+        # de Whisper (como 'Detected language:') o PyTorch contamine el canal JSON
+        sys.stdout = sys.stderr
+        result = model.transcribe(file_path, **kwargs)
+    finally:
+        sys.stdout = real_stdout
 
     segments_raw = result.get("segments", [])
     detected_language = result.get("language", language)
@@ -167,6 +178,18 @@ def transcribir(file_path: str, model_name: str, language: str, num_speakers: in
 
 
 def main():
+    # Validación de versión mínima requerida (>= 3.8) y recomendación pedagógica (3.11 / 3.12)
+    py_major, py_minor = sys.version_info.major, sys.version_info.minor
+    if py_major != 3 or py_minor < 8:
+        py_ver = sys.version.split()[0]
+        print(json.dumps({
+            "error": (
+                f"Versión de Python ({py_ver}) incompatible con OpenAI Whisper. Se requiere como mínimo Python 3.8 "
+                f"(recomendado preferentemente Python 3.11 o Python 3.12 debido a torch, numba, numpy y tiktoken)."
+            )
+        }, ensure_ascii=False))
+        sys.exit(1)
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--file", required=True)
     parser.add_argument("--model", default="small")

@@ -93,7 +93,14 @@ export class WhisperBridgeService {
         throw new Error('El motor de Whisper no devolvió datos estructurados.');
       }
 
-      const parsed = JSON.parse(jsonRes);
+      let textoJson = jsonRes.trim();
+      const posInicio = textoJson.indexOf('{');
+      const posFin = textoJson.lastIndexOf('}');
+      if (posInicio !== -1 && posFin !== -1 && posFin >= posInicio) {
+        textoJson = textoJson.substring(posInicio, posFin + 1);
+      }
+
+      const parsed = JSON.parse(textoJson);
       if (parsed.error) {
         throw new Error(`Error de transcripción: ${parsed.error}`);
       }

@@ -23,6 +23,10 @@ import json
 import argparse
 import math
 import os
+import warnings
+
+# Suprimir advertencias de librerías para garantizar que no contaminen la salida
+warnings.filterwarnings("ignore")
 
 # ---------------------------------------------------------------------------
 # Umbrales de diarizacion por energia (ajustables sin tocar logica)
@@ -114,12 +118,19 @@ def transcribir(file_path: str, model_name: str, language: str, num_speakers: in
     print(f"[whisper_runner] Cargando modelo: {resolved_model}", file=sys.stderr)
     model = whisper.load_model(resolved_model)
 
-    kwargs = {"word_timestamps": False, "verbose": False}
+    kwargs = {"word_timestamps": False, "verbose": None}
     if language and language.lower() not in ("auto", ""):
         kwargs["language"] = language
 
     print(f"[whisper_runner] Transcribiendo: {os.path.basename(file_path)}", file=sys.stderr)
-    result = model.transcribe(file_path, **kwargs)
+    real_stdout = sys.stdout
+    try:
+        # Redirigir stdout a stderr durante la inferencia para que ningún mensaje
+        # de Whisper (como 'Detected language:') o PyTorch contamine el canal JSON
+        sys.stdout = sys.stderr
+        result = model.transcribe(file_path, **kwargs)
+    finally:
+        sys.stdout = real_stdout
 
     segments_raw = result.get("segments", [])
     detected_language = result.get("language", language)
