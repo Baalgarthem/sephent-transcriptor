@@ -9,7 +9,7 @@
   },
   "package": {
     "productName": "Sephent Transcriptor",
-    "version": "0.1.11"
+    "version": "0.1.12"
   },
   "tauri": {
     "allowlist": {

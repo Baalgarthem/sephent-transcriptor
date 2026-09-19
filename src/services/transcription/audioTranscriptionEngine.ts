@@ -217,8 +217,9 @@ export class AudioTranscriptionEngine {
       const nombre = speakerNames[seg.speakerId] || seg.speakerId;
       const tInicio = this.formatearSegundos(seg.startTime);
       const tFin = this.formatearSegundos(seg.endTime);
+      const textoNormalizado = this.corregirPuntuacionYOrtografia(seg.text, idioma);
       lineas.push(`[${tInicio} - ${tFin}] ${nombre}:`);
-      lineas.push(`    "${seg.text}"\n`);
+      lineas.push(`    "${textoNormalizado}"\n`);
     }
 
     return lineas.join('\n');
@@ -226,19 +227,101 @@ export class AudioTranscriptionEngine {
 
   public static generarSubtitulosSrt(
     segmentos: RawTranscriptSegment[],
-    speakerNames: Record<string, string>
+    speakerNames: Record<string, string>,
+    idioma: string = 'es'
   ): string {
     const bloques: string[] = [];
 
     segmentos.forEach((seg, idx) => {
       const nombre = speakerNames[seg.speakerId] || seg.speakerId;
+      const textoNormalizado = this.corregirPuntuacionYOrtografia(seg.text, idioma);
       bloques.push(String(idx + 1));
       bloques.push(`${this.formatearSegundosSRT(seg.startTime)} --> ${this.formatearSegundosSRT(seg.endTime)}`);
-      bloques.push(`<b>${nombre}:</b> ${seg.text}`);
+      bloques.push(`<b>${nombre}:</b> ${textoNormalizado}`);
       bloques.push('');
     });
 
     return bloques.join('\n');
+  }
+
+  public static corregirPuntuacionYOrtografia(texto: string, idioma: string = 'es'): string {
+    if (!texto || !texto.trim()) return '';
+    let t = texto.trim();
+    t = t.replace(/\s+/g, ' ');
+    t = t.replace(/\s+([,.:;?!])/g, '$1');
+    t = t.replace(/([,.:;])([^\s0-9])/g, '$1 $2');
+
+    if (idioma.toLowerCase().startsWith('es') || idioma.toLowerCase() === 'auto') {
+      const reemplazos: [RegExp, string][] = [
+        [/\b(t|T)ambien\b/g, '$1ambién'],
+        [/\b(a|A)demas\b/g, '$1demás'],
+        [/\b(d|D)espues\b/g, '$1espués'],
+        [/\b(a|A)qui\b/g, '$1quí'],
+        [/\b(a|A)lli\b/g, '$1llí'],
+        [/\b(a|A)lla\b/g, '$1llá'],
+        [/\b(e|E)sta bien\b/g, '$1stá bien'],
+        [/\b(e|E)stan\b/g, '$1stán'],
+        [/\b(e|E)stara\b/g, '$1stará'],
+        [/\b(e|E)staria\b/g, '$1staría'],
+        [/\b(h|H)abia\b/g, '$1abía'],
+        [/\b(n|N)umero\b/g, '$1úmero'],
+        [/\b(n|N)umeros\b/g, '$1úmeros'],
+        [/\b(m|M)etodo\b/g, '$1étodo'],
+        [/\b(m|M)etodos\b/g, '$1étodos'],
+        [/\b(a|A)nalisis\b/g, '$1nálisis'],
+        [/\b(s|S)ituacion\b/g, '$1ituación'],
+        [/\b(i|I)nformacion\b/g, '$1nformación'],
+        [/\b(v|V)ersion\b/g, '$1ersión'],
+        [/\b(o|O)pini[oó]n\b/g, '$1pinión'],
+        [/\b(o|O)piniones\b/g, '$1piniones'],
+        [/\b(a|A)tencion\b/g, '$1tención'],
+        [/\b(c|C)onclusion\b/g, '$1onclusión'],
+        [/\b(d|D)eclaracion\b/g, '$1eclaración'],
+        [/\b(i|I)nvestigacion\b/g, '$1nvestigación'],
+        [/\b(g|G)rabacion\b/g, '$1rabación'],
+        [/\b(r|R)azon\b/g, '$1azón'],
+        [/\b(c|C)orazon\b/g, '$1orazón'],
+        [/\b(m|M)as o menos\b/g, '$1ás o menos'],
+        [/\b(m|M)as que\b/g, '$1ás que'],
+        [/\b(m|M)as de\b/g, '$1ás de'],
+        [/\b(p|P)or que\?/g, '$1or qué?'],
+      ];
+      for (const [pat, repl] of reemplazos) {
+        t = t.replace(pat, repl);
+      }
+
+      t = t.replace(/([a-záéíóúñA-ZÁÉÍÓÚÑ]{2,})(cion|sion)\b/gi, '$1ción');
+
+      if (t.includes('?') && !t.includes('¿')) {
+        if (t.includes(',') && t.indexOf(',') < t.lastIndexOf('?')) {
+          const idx = t.lastIndexOf(',');
+          t = t.slice(0, idx + 1) + ' ¿' + t.slice(idx + 1).trim();
+        } else {
+          t = '¿' + t;
+        }
+      }
+
+      if (t.includes('!') && !t.includes('¡')) {
+        t = '¡' + t;
+      }
+    }
+
+    if (t.length > 0) {
+      if ((t[0] === '¿' || t[0] === '¡') && t.length > 1) {
+        t = t[0] + t[1].toUpperCase() + t.slice(2);
+      } else {
+        t = t[0].toUpperCase() + t.slice(1);
+      }
+    }
+
+    t = t.replace(/([.!?]\s+)([a-záéíóúñ])/g, (_, p1, p2) => p1 + p2.toUpperCase());
+
+    const cierre = ['.', '?', '!', '…', ':', '"', "'", '”'];
+    if (t && !cierre.includes(t[t.length - 1])) {
+      t += '.';
+    }
+
+    return t;
   }
 
   public static formatearSegundos(segundos: number): string {
