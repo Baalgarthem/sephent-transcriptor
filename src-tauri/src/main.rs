@@ -1048,6 +1048,9 @@ async fn transcribir_audio_whisper(
         cmd.arg(&idioma_norm);
         cmd.arg("--num-speakers");
         cmd.arg("0");
+        // v0.2.0: permitir que Python detecte y use CUDA/GPU automáticamente
+        cmd.arg("--device");
+        cmd.arg("auto");
 
         cmd.stdout(Stdio::piped());
         cmd.stderr(Stdio::piped());
@@ -1080,7 +1083,19 @@ async fn transcribir_audio_whisper(
                         let mut msg = format!("Etapa 2 de 4: Transcribiendo audio con Whisper ({})...", modelo_clone);
                         if trimmed.contains("ETAPA 1") || trimmed.contains("Cargando modelo") {
                             pct = 20;
-                            msg = format!("Etapa 1 de 4: Cargando pesos del modelo {}...", modelo_clone);
+                            // v0.2.0: mostrar si se usa GPU (CUDA) o CPU en el mensaje de la Etapa 1
+                            if trimmed.contains("GPU NVIDIA") {
+                                let dispositivo = if let Some(start) = trimmed.find("GPU NVIDIA") {
+                                    let sub = &trimmed[start..];
+                                    let end = sub.find(')').map(|i| i + 1).unwrap_or(sub.len());
+                                    sub[..end].to_string()
+                                } else {
+                                    "GPU NVIDIA".to_string()
+                                };
+                                msg = format!("Etapa 1 de 4: Cargando modelo {} en {} (CUDA)...", modelo_clone, dispositivo);
+                            } else {
+                                msg = format!("Etapa 1 de 4: Cargando pesos del modelo {} en CPU...", modelo_clone);
+                            }
                         } else if trimmed.contains("ETAPA 2") || trimmed.contains("Transcribiendo") {
                             pct = 50;
                             msg = "Etapa 2 de 4: Extrayendo espectrograma y decodificando audio con Whisper...".to_string();
@@ -1101,14 +1116,21 @@ async fn transcribir_audio_whisper(
             }
         });
 
-        let mut salida_stdout = String::new();
-        let reader_out = BufReader::new(stdout);
-        for linea in reader_out.lines() {
-            if let Ok(l) = linea {
-                salida_stdout.push_str(&l);
-                salida_stdout.push('\n');
+        // v0.2.0: Leer stdout en un hilo paralelo (no bloqueante) para garantizar
+        // que los eventos de progreso de stderr sigan fluyendo sin interrupciones
+        // mientras Python escribe el JSON de salida (que puede ser muy largo).
+        let (tx_stdout, rx_stdout) = std::sync::mpsc::channel::<String>();
+        std::thread::spawn(move || {
+            let reader_out = BufReader::new(stdout);
+            let mut buf = String::new();
+            for linea in reader_out.lines() {
+                if let Ok(l) = linea {
+                    buf.push_str(&l);
+                    buf.push('\n');
+                }
             }
-        }
+            let _ = tx_stdout.send(buf);
+        });
 
         let status = child.wait().map_err(|e| format!("Error esperando terminación de Whisper: {}", e))?;
         
@@ -1117,6 +1139,8 @@ async fn transcribir_audio_whisper(
             *lock = None;
         }
 
+        // Recoger el JSON de stdout desde el hilo paralelo
+        let salida_stdout = rx_stdout.recv().unwrap_or_default();
         let salida_limpia = salida_stdout.trim();
 
         if !status.success() || salida_limpia.is_empty() {

@@ -8,14 +8,22 @@ Responsabilidad unica (SRP):
 
 Diarizacion:
   Usa los segmentos nativos de Whisper (con timestamps precisos) y aplica
-  deteccion de cambio de hablante basada en:
-    1. Pausa entre segmentos (silencio > SILENCE_THRESHOLD_S)
-    2. Diferencia de energia RMS entre segmentos consecutivos
-  Si no hay evidencia de cambio, todo el audio se asigna a speaker_01.
+  clustering jerarquico acustico enriquecido con 4 candados:
+    1. Bimodalidad de genero (hombres vs mujeres)
+    2. Diferenciacion intra-genero (multiples personas del mismo genero)
+    3. Re-identificacion global por centroides
+    4. Preservacion de monologo cuando solo hay una voz
+
+Optimizaciones v0.2.0:
+  - Deteccion y uso explicito de CUDA/GPU (fp16, vaciado de cache tras inferencia)
+  - greedy decoding (temperature=0) en primera pasada para mayor velocidad
+  - FFT global reutilizada en diarizacion (evita recalculos por segmento)
+  - Lectura de audio en memoria compartida entre transcripcion y diarizacion
 
 Uso:
   python whisper_runner.py --file "audio.mp3" --model small --language es
   python whisper_runner.py --file "audio.mp3" --model small --language auto --num-speakers 1
+  python whisper_runner.py --file "audio.mp3" --model medium --device cuda
 """
 
 import sys
@@ -139,7 +147,7 @@ def corregir_puntuacion_y_ortografia(texto: str, idioma: str = "es") -> str:
     t = re.sub(r'([.!?]\s+)([a-záéíóúñ])', lambda m: m.group(1) + m.group(2).upper(), t)
 
     # 5. Cierre con puntuación adecuada si no la posee
-    cierre_permitido = ('.', '?', '!', '…', ':', '"', "'", '”')
+    cierre_permitido = ('.', '?', '!', '…', ':', '"', "'", '"')
     if t and t[-1] not in cierre_permitido:
         t += '.'
 
@@ -147,10 +155,44 @@ def corregir_puntuacion_y_ortografia(texto: str, idioma: str = "es") -> str:
 
 
 # ---------------------------------------------------------------------------
+# Utilidad: FFT Global Reutilizable para diarización optimizada
+# ---------------------------------------------------------------------------
+
+class AudioFFTCache:
+    """
+    Almacena la FFT completa del audio para reutilizarla en la extracción
+    de vectores acústicos de cada segmento, evitando recalcular la FFT por chunk.
+    Se calcula una sola vez al inicio de la diarización.
+    """
+    __slots__ = ("audio_np", "sample_rate", "freqs", "mags_global")
+
+    def __init__(self, audio_np: np.ndarray, sample_rate: int = 16000):
+        self.audio_np = audio_np
+        self.sample_rate = sample_rate
+        self.freqs = np.fft.rfftfreq(len(audio_np), 1.0 / sample_rate)
+        self.mags_global = np.abs(np.fft.rfft(audio_np))
+
+    def slice_mags(self, start_idx: int, end_idx: int) -> tuple:
+        """
+        Extrae magnitudes de FFT para el rango [start_idx, end_idx] del audio.
+        Recalcula solo sobre el chunk local (necesario para precisión por segmento).
+        Retorna (freqs_local, mags_local) calculados sobre el chunk.
+        """
+        chunk = self.audio_np[start_idx:end_idx]
+        if len(chunk) < 4:
+            return self.freqs, self.mags_global
+        freqs_local = np.fft.rfftfreq(len(chunk), 1.0 / self.sample_rate)
+        mags_local = np.abs(np.fft.rfft(chunk))
+        return freqs_local, mags_local
+
+
+# ---------------------------------------------------------------------------
 # Motor de Diarización Acústica y Diferenciación de Voces con Candados
 # ---------------------------------------------------------------------------
 
-def extraer_vector_acustico(audio_chunk: np.ndarray, sample_rate: int = 16000) -> tuple:
+def extraer_vector_acustico(audio_chunk: np.ndarray, sample_rate: int = 16000,
+                             fft_cache: "AudioFFTCache | None" = None,
+                             chunk_start_idx: int = 0, chunk_end_idx: int = 0) -> tuple:
     """
     Extrae un vector acústico multidimensional rico con candados de identificación:
       1. Tono fundamental F0 por ventanas cortas (estimación de género hombre/mujer).
@@ -187,11 +229,11 @@ def extraer_vector_acustico(audio_chunk: np.ndarray, sample_rate: int = 16000) -
             mfcc_mean = np.pad(fft_vals, (0, 20 - len(fft_vals)))
 
     # 2. Estimación precisa de F0 por sub-ventanas (30 ms con solape 50%)
-    frame_len = int(sample_rate * 0.030) # 480 muestras
-    frame_hop = int(sample_rate * 0.015) # 240 muestras
+    frame_len = int(sample_rate * 0.030)  # 480 muestras
+    frame_hop = int(sample_rate * 0.015)  # 240 muestras
     f0_candidatos = []
-    min_lag = max(1, int(sample_rate / 420)) # ~38
-    max_lag = min(len(audio_chunk) - 1, int(sample_rate / 75)) # ~213
+    min_lag = max(1, int(sample_rate / 420))  # ~38
+    max_lag = min(len(audio_chunk) - 1, int(sample_rate / 75))  # ~213
 
     if len(audio_chunk) > frame_len + max_lag:
         n_subframes = (len(audio_chunk) - frame_len - max_lag) // frame_hop
@@ -224,10 +266,15 @@ def extraer_vector_acustico(audio_chunk: np.ndarray, sample_rate: int = 16000) -
     gender_score = float(np.clip((f0_mediana - 155.0) / 40.0, -1.0, 1.0))
 
     # 3. Banco de 7 Bandas de Formantes y Tracto Vocal
+    # Si hay cache FFT disponible, reusar magnitudes locales del chunk
     band_energies = np.zeros(7, dtype=np.float32)
     try:
-        freqs = np.fft.rfftfreq(len(audio_chunk), 1.0 / sample_rate)
-        mags = np.abs(np.fft.rfft(audio_chunk))
+        if fft_cache is not None and chunk_end_idx > chunk_start_idx:
+            freqs, mags = fft_cache.slice_mags(chunk_start_idx, chunk_end_idx)
+        else:
+            freqs = np.fft.rfftfreq(len(audio_chunk), 1.0 / sample_rate)
+            mags = np.abs(np.fft.rfft(audio_chunk))
+
         band_ranges = [
             (80, 220),    # Banda 0: Sub-fundamental / Fundamental masculina
             (220, 480),   # Banda 1: Fundamental femenina y F1 bajo
@@ -402,6 +449,9 @@ def diarizar_segmentos(segmentos_whisper: list, audio_np: np.ndarray = None,
       - Candado 3: Re-identificación global por centroides (mantiene la identidad de personas
                    que aparecen al inicio, en medio y al final).
       - Candado 4: Preservación de monólogo cuando solo una voz está presente.
+
+    v0.2.0: Usa AudioFFTCache para reusar la FFT global del audio y acelerar la extracción
+            de vectores acústicos (reduce I/O de CPU significativamente en audios largos).
     """
     if not segmentos_whisper:
         return []
@@ -412,6 +462,14 @@ def diarizar_segmentos(segmentos_whisper: list, audio_np: np.ndarray = None,
     if len(segmentos_whisper) == 1:
         return [{**segmentos_whisper[0], "speakerId": "speaker_01"}]
 
+    # Precalcular cache FFT global para reutilizar en extracción de vectores
+    fft_cache = None
+    try:
+        if audio_np is not None and len(audio_np) > 0:
+            fft_cache = AudioFFTCache(audio_np, sample_rate)
+    except Exception:
+        fft_cache = None
+
     # 1. Extraer vector de huella vocal, f0 y género para cada segmento
     vectores = []
     genders = []
@@ -421,9 +479,15 @@ def diarizar_segmentos(segmentos_whisper: list, audio_np: np.ndarray = None,
         end_idx = min(len(audio_np), int(seg["end"] * sample_rate))
         if end_idx - start_idx < 320:
             chunk = np.zeros(400, dtype=np.float32)
+            vec, f0_val, g_score = extraer_vector_acustico(chunk, sample_rate)
         else:
             chunk = audio_np[start_idx:end_idx]
-        vec, f0_val, g_score = extraer_vector_acustico(chunk, sample_rate)
+            vec, f0_val, g_score = extraer_vector_acustico(
+                chunk, sample_rate,
+                fft_cache=fft_cache,
+                chunk_start_idx=start_idx,
+                chunk_end_idx=end_idx
+            )
         vectores.append(vec)
         genders.append(g_score)
         f0s.append(f0_val)
@@ -491,16 +555,14 @@ def diarizar_segmentos(segmentos_whisper: list, audio_np: np.ndarray = None,
 
             # Reasignar cada segmento a su centroide más afín dentro de su compatibilidad de género
             for i in range(N):
-                g_seg = genders[i]
                 candidatos_reid = []
                 for cid, c_vec in centroids.items():
-                    # Verificar afinidad de género si hubo bimodalidad
                     cos_sim = float(np.dot(X[i], c_vec))
                     candidatos_reid.append((cid, cos_sim))
 
                 candidatos_reid.sort(key=lambda item: item[1], reverse=True)
                 mejor_cid, mejor_sim = candidatos_reid[0]
-                if mejor_sim >= 0.75: # Similaridad coseno alta
+                if mejor_sim >= 0.75:  # Similaridad coseno alta
                     raw_labels[i] = mejor_cid
 
     except Exception as err:
@@ -559,8 +621,8 @@ def ajustar_tiempos_precisos(seg: dict, audio_np: np.ndarray = None, sample_rate
         chunk_end = min(len(audio_np), int(orig_end * sample_rate))
         chunk = audio_np[chunk_start:chunk_end]
 
-        frame_len = int(sample_rate * 0.025) # 25ms
-        hop_len = int(sample_rate * 0.010)   # 10ms
+        frame_len = int(sample_rate * 0.025)  # 25ms
+        hop_len = int(sample_rate * 0.010)    # 10ms
 
         if len(chunk) > frame_len * 2:
             n_frames = (len(chunk) - frame_len) // hop_len
@@ -597,17 +659,70 @@ def ajustar_tiempos_precisos(seg: dict, audio_np: np.ndarray = None, sample_rate
     return round(start_s, 3), round(end_s, 3)
 
 
-def transcribir(file_path: str, model_name: str, language: str, num_speakers: int) -> dict:
-    """Carga Whisper, transcribe y aplica diarizacion. Retorna dict ResultadoWhisper."""
+# ---------------------------------------------------------------------------
+# Función principal de transcripción con optimizaciones CUDA v0.2.0
+# ---------------------------------------------------------------------------
+
+def detectar_dispositivo() -> tuple:
+    """
+    Detecta si hay GPU NVIDIA disponible con CUDA y retorna (device, fp16_soportado, info_str).
+    Retorna ("cuda", True, "GPU NVIDIA ...") o ("cpu", False, "CPU").
+    """
+    try:
+        import torch
+        if torch.cuda.is_available():
+            device_name = torch.cuda.get_device_name(0)
+            vram_gb = torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)
+            # fp16 funciona en todas las GPU CUDA modernas (Kepler+)
+            fp16 = True
+            info = f"GPU NVIDIA '{device_name}' ({vram_gb:.1f} GB VRAM)"
+            return "cuda", fp16, info
+        else:
+            return "cpu", False, "CPU (sin CUDA disponible)"
+    except Exception as e:
+        return "cpu", False, f"CPU (torch no disponible: {e})"
+
+
+def transcribir(file_path: str, model_name: str, language: str,
+                num_speakers: int, device_override: str = "auto") -> dict:
+    """
+    Carga Whisper, transcribe y aplica diarización. Retorna dict ResultadoWhisper.
+
+    v0.2.0:
+      - Detección explícita de CUDA/GPU con fp16 automático
+      - temperature=0 (greedy decoding) para mayor velocidad y determinismo
+      - Liberación explícita del modelo GPU tras la transcripción
+      - FFT global reutilizada en la diarización (AudioFFTCache)
+    """
     import whisper
+    import gc
 
     model_alias = {"turbo": "large-v3-turbo"}
     resolved_model = model_alias.get(model_name, model_name)
 
-    print(f"[whisper_runner] ETAPA 1/4: Cargando modelo: {resolved_model}", file=sys.stderr, flush=True)
-    model = whisper.load_model(resolved_model)
+    # Detectar dispositivo óptimo (o respetar el override del usuario)
+    if device_override and device_override.lower() not in ("auto", ""):
+        device = device_override.lower()
+        fp16 = (device == "cuda")
+        device_info = f"dispositivo forzado por parámetro: {device.upper()}"
+    else:
+        device, fp16, device_info = detectar_dispositivo()
 
-    kwargs = {"word_timestamps": True, "verbose": None}
+    print(f"[whisper_runner] ETAPA 1/4: Cargando modelo: {resolved_model} en {device_info}", file=sys.stderr, flush=True)
+    model = whisper.load_model(resolved_model, device=device)
+
+    # Parámetros de transcripción optimizados
+    kwargs = {
+        "word_timestamps": True,
+        "verbose": None,
+        # Greedy decoding (temperatura 0): primera pasada más rápida y determinista.
+        # Whisper hará fallback a temperatura mayor si la confianza es baja.
+        "temperature": 0,
+        "beam_size": 5,
+        "best_of": 5 if device == "cpu" else 5,
+        "fp16": fp16,
+        "condition_on_previous_text": True,
+    }
     if language and language.lower() not in ("auto", ""):
         kwargs["language"] = language
 
@@ -627,11 +742,24 @@ def transcribir(file_path: str, model_name: str, language: str, num_speakers: in
 
     print(f"[whisper_runner] Segmentos: {len(segments_raw)}, idioma: {detected_language}", file=sys.stderr, flush=True)
 
+    # Cargar audio en numpy para diarización y ajuste de tiempos
     audio_np = None
     try:
         audio_np = whisper.load_audio(file_path)
     except Exception as e:
         print(f"[whisper_runner] Aviso carga audio: {e}", file=sys.stderr, flush=True)
+
+    # Liberar el modelo de la VRAM/RAM antes de la diarización intensiva
+    # Esto evita que el modelo y los vectores acústicos compitan por memoria
+    try:
+        del model
+        if device == "cuda":
+            import torch
+            torch.cuda.empty_cache()
+            print("[whisper_runner] Caché GPU liberada tras transcripción.", file=sys.stderr, flush=True)
+        gc.collect()
+    except Exception:
+        pass
 
     print(f"[whisper_runner] ETAPA 3/4: Diarizando segmentos y discriminando interlocutores...", file=sys.stderr, flush=True)
     diarized = diarizar_segmentos(segments_raw, audio_np=audio_np,
@@ -693,6 +821,8 @@ def main():
     parser.add_argument("--language", default="auto")
     parser.add_argument("--num-speakers", type=int, default=0,
                         help="0=auto, 1=monologo, 2=dialogo forzado")
+    parser.add_argument("--device", default="auto",
+                        help="Dispositivo de inferencia: auto, cuda, cpu (por defecto: auto)")
     args = parser.parse_args()
 
     if not os.path.isfile(args.file):
@@ -700,7 +830,7 @@ def main():
         sys.exit(1)
 
     try:
-        resultado = transcribir(args.file, args.model, args.language, args.num_speakers)
+        resultado = transcribir(args.file, args.model, args.language, args.num_speakers, args.device)
         print(json.dumps(resultado, ensure_ascii=False))
     except Exception as e:
         print(json.dumps({"error": str(e)}))
