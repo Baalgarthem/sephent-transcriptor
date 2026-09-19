@@ -43,12 +43,20 @@ warnings.filterwarnings("ignore")
 
 def corregir_puntuacion_y_ortografia(texto: str, idioma: str = "es") -> str:
     """
-    Normaliza y pule la puntuación y ortografía de la transcripción:
-      1. Emparejamiento de signos interrogativos (¿ ?) y exclamativos (¡ !).
-      2. Acentuación de pronombres y adverbios interrogativos (qué, cómo, cuándo, etc.).
-      3. Corrección de palabras frecuentes con tildes omitidas en español.
-      4. Mayúscula inicial de oraciones y tras signos de cierre.
-      5. Limpieza de espaciado alrededor de signos de puntuación.
+    Normaliza y pule la puntuación y ortografía de la transcripción.
+
+    Comportamiento por idioma:
+      - Español (es), catalán (ca), gallego (gl), asturiano (ast):
+          Usan APERTURA + CIERRE (¿...? y ¡...!). Se insertan los signos de
+          apertura cuando faltan, y se aplican correcciones léxicas con tildes.
+      - Todos los demás idiomas (en, fr, pt, it, de, etc.):
+          Solo usan el signo de CIERRE (? y !), como en inglés.
+          No se insertan ¿ ni ¡; si Whisper los añadió por error, se eliminan.
+
+    Pasos comunes a todos los idiomas:
+      1. Limpieza de espaciado alrededor de signos de puntuación.
+      2. Mayúscula inicial y tras signos de cierre.
+      3. Cierre de oración con punto si no tiene puntuación final.
     """
     import re
     if not texto or not texto.strip():
@@ -56,13 +64,21 @@ def corregir_puntuacion_y_ortografia(texto: str, idioma: str = "es") -> str:
 
     t = texto.strip()
 
+    # Determinar código de idioma normalizado (ej: "es-MX" → "es", "auto" → "auto")
+    codigo_idioma = idioma.lower().split("-")[0].split("_")[0]
+
+    # Idiomas que usan signos de APERTURA y CIERRE (¿...? y ¡...!)
+    # Español, catalán, gallego y asturiano comparten esta convención tipográfica.
+    IDIOMAS_CON_APERTURA = {"es", "ca", "gl", "ast"}
+    usa_apertura = codigo_idioma in IDIOMAS_CON_APERTURA
+
     # 1. Normalizar espacios y signos pegados o duplicados
     t = re.sub(r'\s+', ' ', t)
     t = re.sub(r'\s+([,.:;?!])', r'\1', t)
     t = re.sub(r'([,.:;])([^\s0-9])', r'\1 \2', t)
 
-    # 2. Correcciones léxicas y de acentuación para español
-    if idioma.lower().startswith("es") or idioma.lower() in ("auto", ""):
+    # 2. Correcciones léxicas y de acentuación — solo para español
+    if codigo_idioma == "es" or (codigo_idioma == "auto" and usa_apertura):
         reemplazos_lexicos = [
             (r'\b(t|T)ambien\b', r'\1ambién'),
             (r'\b(a|A)demas\b', r'\1demás'),
@@ -103,10 +119,11 @@ def corregir_puntuacion_y_ortografia(texto: str, idioma: str = "es") -> str:
         for pat, repl in reemplazos_lexicos:
             t = re.sub(pat, repl, t)
 
-        # Regla general palabras agudas terminadas en -cion o -sion
+        # Regla general: palabras agudas terminadas en -cion o -sion
         t = re.sub(r'([a-záéíóúñA-ZÁÉÍÓÚÑ]{2,})(cion|sion)\b', r'\1ción', t)
 
-        # 3. Emparejamiento de signos de interrogación y exclamación
+    # 3. Signos de apertura (¿ y ¡) — solo para idiomas que los usan
+    if usa_apertura:
         if '?' in t and '¿' not in t:
             if ',' in t and t.find(',') < t.rfind('?'):
                 idx_coma = t.rfind(',')
@@ -121,8 +138,8 @@ def corregir_puntuacion_y_ortografia(texto: str, idioma: str = "es") -> str:
             else:
                 t = '¡' + t
 
-        # Acentuación de palabras interrogativas dentro de preguntas
-        if '¿' in t or '?' in t:
+        # Acentuación de palabras interrogativas en español dentro de preguntas
+        if codigo_idioma == "es" and ('¿' in t or '?' in t):
             t = re.sub(r'(¿|\b)([qQ])ue\b(?=[^.?!]*\?)', r'\1\2ué', t)
             t = re.sub(r'(¿|\b)([cC])omo\b(?=[^.?!]*\?)', r'\1\2ómo', t)
             t = re.sub(r'(¿|\b)([cC])uando\b(?=[^.?!]*\?)', r'\1\2uándo', t)
@@ -135,6 +152,11 @@ def corregir_puntuacion_y_ortografia(texto: str, idioma: str = "es") -> str:
             t = re.sub(r'(¿|\b)([cC])uanta\b(?=[^.?!]*\?)', r'\1\2uánta', t)
             t = re.sub(r'(¿|\b)([cC])uantos\b(?=[^.?!]*\?)', r'\1\2uántos', t)
             t = re.sub(r'(¿|\b)([cC])uantas\b(?=[^.?!]*\?)', r'\1\2uántas', t)
+    else:
+        # Para todos los demás idiomas: eliminar cualquier ¿ o ¡ que Whisper
+        # pudiera haber insertado incorrectamente (ej. audio en inglés)
+        t = t.replace('¿', '').replace('¡', '')
+        t = re.sub(r'\s+', ' ', t).strip()
 
     # 4. Mayúscula inicial
     if len(t) > 0:
