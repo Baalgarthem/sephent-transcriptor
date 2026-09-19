@@ -36,7 +36,7 @@ warnings.filterwarnings("ignore")
 def extraer_vector_acustico(audio_chunk: np.ndarray, sample_rate: int = 16000) -> np.ndarray:
     """Extrae características tímbricas y acústicas (MFCC, Pitch F0 y Centroide) de un segmento."""
     if len(audio_chunk) < 320:
-        return np.zeros(42, dtype=np.float32)
+        return np.zeros(40, dtype=np.float32)
 
     # 1. MFCCs usando torchaudio si está disponible
     mfcc_mean = np.zeros(20, dtype=np.float32)
@@ -89,19 +89,147 @@ def extraer_vector_acustico(audio_chunk: np.ndarray, sample_rate: int = 16000) -
     except Exception:
         pass
 
-    # Normalización básica de escala
-    vector = np.concatenate([
-        mfcc_mean,
-        mfcc_std,
-        np.array([pitch_val / 500.0, spectral_centroid / 5000.0], dtype=np.float32)
-    ])
-    return vector
+    # Normalización por sub-bloques:
+    # Se descarta c0 (energía/amplitud general) para evitar sesgos de volumen o distancia al micrófono
+    m_mean_sub = mfcc_mean[1:] if len(mfcc_mean) > 1 else mfcc_mean
+    m_std_sub = mfcc_std[1:] if len(mfcc_std) > 1 else mfcc_std
+    norm_m_mean = m_mean_sub / (np.linalg.norm(m_mean_sub) + 1e-7)
+    norm_m_std = m_std_sub / (np.linalg.norm(m_std_sub) + 1e-7)
+
+    # Bloque prosódico (tono fundamental y brillo espectral)
+    prosodic = np.array([pitch_val / 200.0, spectral_centroid / 2000.0], dtype=np.float32)
+    norm_prosodic = prosodic / (np.linalg.norm(prosodic) + 1e-7)
+
+    # Vector acústico unitario combinado
+    vector = np.concatenate([norm_m_mean, norm_m_std * 0.5, norm_prosodic * 0.8])
+    norm_total = np.linalg.norm(vector)
+    if norm_total > 1e-7:
+        vector = vector / norm_total
+    return vector.astype(np.float32)
+
+
+def _calcular_silueta_acustica(X: np.ndarray, labels: np.ndarray) -> float:
+    """Calcula el coeficiente de silueta promedio con distancia coseno."""
+    import scipy.spatial.distance as ssd
+    n = len(X)
+    unique_labels = np.unique(labels)
+    k = len(unique_labels)
+    if k <= 1 or k >= n:
+        return 0.0
+
+    dists = ssd.squareform(ssd.pdist(X, metric='cosine'))
+    silhouettes = np.zeros(n)
+    for i in range(n):
+        l_i = labels[i]
+        same_mask = (labels == l_i)
+        if np.sum(same_mask) <= 1:
+            silhouettes[i] = 0.0
+            continue
+        a_i = float(np.sum(dists[i][same_mask]) / (np.sum(same_mask) - 1))
+
+        b_i = 1e9
+        for other_l in unique_labels:
+            if other_l == l_i:
+                continue
+            other_mask = (labels == other_l)
+            if np.sum(other_mask) == 0:
+                continue
+            mean_dist = float(np.mean(dists[i][other_mask]))
+            if mean_dist < b_i:
+                b_i = mean_dist
+
+        max_ab = max(a_i, b_i)
+        if max_ab > 0:
+            silhouettes[i] = (b_i - a_i) / max_ab
+
+    return float(np.mean(silhouettes))
+
+
+def _distancia_minima_centroides(X: np.ndarray, labels: np.ndarray) -> float:
+    """Calcula la distancia coseno mínima entre los centroides de los clusters."""
+    import scipy.spatial.distance as ssd
+    unique_labels = np.unique(labels)
+    centroids = []
+    for l in unique_labels:
+        pts = X[labels == l]
+        c = np.mean(pts, axis=0)
+        norm = np.linalg.norm(c)
+        if norm > 1e-7:
+            c = c / norm
+        centroids.append(c)
+    centroids = np.array(centroids)
+    if len(centroids) < 2:
+        return 0.0
+    return float(np.min(ssd.pdist(centroids, metric='cosine')))
+
+
+def determinar_numero_hablantes(X: np.ndarray, max_k: int = 5) -> tuple:
+    """
+    Determina de manera robusta el número óptimo de interlocutores K >= 1.
+    Si habla una sola persona, garantiza K=1 (monólogo).
+    Si existen 2, 3 o 4 voces diferenciadas, identifica el K exacto.
+    """
+    import scipy.cluster.hierarchy as sch
+    import scipy.spatial.distance as ssd
+
+    N = len(X)
+    if N <= 1:
+        return 1, np.ones(N, dtype=int)
+
+    if N == 2:
+        d = float(ssd.cosine(X[0], X[1]))
+        if d >= 0.28:
+            return 2, np.array([1, 2], dtype=int)
+        else:
+            return 1, np.ones(2, dtype=int)
+
+    p_dist = ssd.pdist(X, metric='cosine')
+    p_dist = np.nan_to_num(p_dist, nan=0.0)
+
+    # Si la dispersión espectral máxima entre cualquier par de segmentos es muy reducida, es un monólogo
+    if np.max(p_dist) < 0.12:
+        return 1, np.ones(N, dtype=int)
+
+    Z = sch.linkage(p_dist, method='average')
+    candidatos = []
+    lim_k = min(max_k, N)
+
+    for k in range(2, lim_k + 1):
+        labels = sch.fcluster(Z, t=k, criterion='maxclust')
+        unique_l, counts = np.unique(labels, return_counts=True)
+        if len(unique_l) < k:
+            continue
+
+        # Evitar falsos positivos por 1 segmento ruidoso en grabaciones largas
+        min_count = np.min(counts)
+        if N >= 8 and min_count < 2:
+            continue
+
+        min_c_dist = _distancia_minima_centroides(X, labels)
+        sil = _calcular_silueta_acustica(X, labels)
+
+        # Criterio estricto de diferenciación vocal:
+        # 1. Separación de centroides tímbricos >= 0.26 (indica cuerdas vocales/tracto acústico distinto)
+        # 2. Silueta media >= 0.26 (agrupamiento cohesivo real, no continuo unimodal de un solo hablante)
+        if min_c_dist >= 0.26 and sil >= 0.26:
+            candidatos.append((k, sil, min_c_dist, labels))
+
+    if not candidatos:
+        # Monólogo confirmado: se preserva estrictamente como una sola voz
+        return 1, np.ones(N, dtype=int)
+
+    # Si hay candidatos válidos, seleccionar el que maximice la silueta de separación
+    candidatos.sort(key=lambda item: item[1], reverse=True)
+    mejor_k, mejor_sil, mejor_dist, mejores_labels = candidatos[0]
+    return mejor_k, mejores_labels
 
 
 def diarizar_segmentos(segmentos_whisper: list, audio_np: np.ndarray = None,
                        sample_rate: int = 16000, num_speakers_forzado: int = 0) -> list:
     """
     Identifica y diferencia a los interlocutores mediante clustering espectral de huellas de voz.
+    Si solo habla una persona, se mantiene estrictamente en una voz (speaker_01).
+    Si hay 2, 3 o 4 voces, identifica puntualmente a cada hablante real.
     """
     if not segmentos_whisper:
         return []
@@ -125,40 +253,27 @@ def diarizar_segmentos(segmentos_whisper: list, audio_np: np.ndarray = None,
         vectores.append(vec)
 
     X = np.array(vectores, dtype=np.float32)
-
-    # 2. Estandarización de características
-    stds = np.std(X, axis=0)
-    stds[stds == 0] = 1.0
-    X_norm = (X - np.mean(X, axis=0)) / stds
-
     raw_labels = np.ones(len(segmentos_whisper), dtype=int)
 
     try:
         import scipy.cluster.hierarchy as sch
         import scipy.spatial.distance as ssd
 
-        p_dist = ssd.pdist(X_norm, metric='cosine')
-        p_dist = np.nan_to_num(p_dist, nan=0.0)
-
-        if len(p_dist) > 0 and np.max(p_dist) > 0.05:
+        if num_speakers_forzado >= 2:
+            p_dist = ssd.pdist(X, metric='cosine')
+            p_dist = np.nan_to_num(p_dist, nan=0.0)
             Z = sch.linkage(p_dist, method='average')
-
-            if num_speakers_forzado >= 2:
-                k = min(num_speakers_forzado, len(segmentos_whisper))
-                raw_labels = sch.fcluster(Z, t=k, criterion='maxclust')
-            else:
-                # Detección bimodal automática de interlocutores
-                max_d = float(np.max(p_dist))
-                # Si existe separación acústica suficiente entre turnos, separamos en 2 interlocutores
-                if max_d > 0.15:
-                    raw_labels = sch.fcluster(Z, t=2, criterion='maxclust')
-                else:
-                    raw_labels = np.ones(len(segmentos_whisper), dtype=int)
+            k = min(num_speakers_forzado, len(segmentos_whisper))
+            raw_labels = sch.fcluster(Z, t=k, criterion='maxclust')
+        else:
+            # Determinación automática rigurosa de número de interlocutores
+            k_optimo, raw_labels = determinar_numero_hablantes(X, max_k=5)
+            print(f"[whisper_runner] Interlocutores identificados: {k_optimo}", file=sys.stderr)
     except Exception as err:
-        print(f"[whisper_runner] Aviso clustering jerárquico: {err}", file=sys.stderr)
+        print(f"[whisper_runner] Aviso clustering acústico: {err}", file=sys.stderr)
         raw_labels = np.ones(len(segmentos_whisper), dtype=int)
 
-    # 3. Mapeo cronológico (el primer hablante en intervenir siempre es speaker_01, el segundo speaker_02, etc.)
+    # 2. Mapeo cronológico (el primer hablante en intervenir siempre es speaker_01, el segundo speaker_02, etc.)
     mapa_hablantes = {}
     hablante_contador = 1
     resultado = []
