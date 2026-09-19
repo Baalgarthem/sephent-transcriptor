@@ -785,6 +785,8 @@ libs = [
   {"id": "openai-whisper", "paquetePip": "openai-whisper", "module": "whisper", "nombre": "OpenAI Whisper", "desc": "Motor base para la transcripción acústica de audio y video", "rol": "Transcripción ASR", "obligatoria": True},
   {"id": "torch", "paquetePip": "torch", "module": "torch", "nombre": "PyTorch (Torch)", "desc": "Motor tensorial y aceleración para inferencia de redes neuronales", "rol": "Inferencia Neuronal", "obligatoria": True},
   {"id": "torchaudio", "paquetePip": "torchaudio", "module": "torchaudio", "nombre": "TorchAudio", "desc": "Extracción espectral, banco de filtros Mel y coeficientes MFCC", "rol": "Procesamiento Acústico", "obligatoria": True},
+  {"id": "pyannote.audio", "paquetePip": "pyannote.audio", "module": "pyannote.audio", "nombre": "pyannote.audio 4.x", "desc": "Pipeline neuronal de diarización, segmentación y huellas de hablantes (community-1)", "rol": "Diarización Neuronal", "obligatoria": False},
+  {"id": "torchcodec", "paquetePip": "torchcodec", "module": "torchcodec", "nombre": "TorchCodec", "desc": "Decodificación nativa acelerada de audio para pyannote 4.x", "rol": "Decodificación de Audio", "obligatoria": False},
   {"id": "scipy", "paquetePip": "scipy", "module": "scipy", "nombre": "SciPy", "desc": "Análisis matemático de señales, distancias de coseno y clustering", "rol": "Diarización y Clustering", "obligatoria": True},
   {"id": "scikit-learn", "paquetePip": "scikit-learn", "module": "sklearn", "nombre": "Scikit-Learn", "desc": "Algoritmos avanzados de agrupamiento espectral y separación de hablantes", "rol": "Diarización Pericial", "obligatoria": False},
   {"id": "soundfile", "paquetePip": "soundfile", "module": "soundfile", "nombre": "SoundFile", "desc": "Decodificación precisa de audio multiformato y streaming PCM", "rol": "Decodificación de Audio", "obligatoria": False}
@@ -932,6 +934,14 @@ async fn guardar_archivo_texto(ruta: String, contenido: String) -> Result<(), St
 }
 
 const RUNNER_SCRIPT: &str = include_str!("../../tools/whisper_runner.py");
+const DIAR_INIT_SCRIPT: &str = include_str!("../../tools/diarization/__init__.py");
+const DIAR_DATA_MODELS_SCRIPT: &str = include_str!("../../tools/diarization/data_models.py");
+const DIAR_AUDIO_VALIDATOR_SCRIPT: &str = include_str!("../../tools/diarization/audio_validator.py");
+const DIAR_DIAGNOSTICS_SCRIPT: &str = include_str!("../../tools/diarization/diagnostics.py");
+const DIAR_MODEL_MANAGER_SCRIPT: &str = include_str!("../../tools/diarization/model_manager.py");
+const DIAR_SERVICE_SCRIPT: &str = include_str!("../../tools/diarization/diarization_service.py");
+const DIAR_RECONCILER_SCRIPT: &str = include_str!("../../tools/diarization/reconciler.py");
+const DIAR_SELF_TEST_SCRIPT: &str = include_str!("../../tools/diarization/self_test.py");
 
 fn normalizar_nombre_modelo(raw: &str) -> String {
     let lower = raw.to_lowercase();
@@ -1015,9 +1025,19 @@ async fn transcribir_audio_whisper(
             return Err("OpenAI Whisper no está instalado en el entorno de Python detectado. Puedes instalarlo con un solo clic desde el Gestor de Modelos.".to_string());
         }
 
-        // Desplegar whisper_runner.py en carpeta temporal si es necesario
+        // Desplegar whisper_runner.py y el paquete de diarización en carpeta temporal
         let temp_dir = std::env::temp_dir().join("sephent_transcriptor");
-        let _ = std::fs::create_dir_all(&temp_dir);
+        let diar_dir = temp_dir.join("diarization");
+        let _ = std::fs::create_dir_all(&diar_dir);
+        let _ = std::fs::write(diar_dir.join("__init__.py"), DIAR_INIT_SCRIPT);
+        let _ = std::fs::write(diar_dir.join("data_models.py"), DIAR_DATA_MODELS_SCRIPT);
+        let _ = std::fs::write(diar_dir.join("audio_validator.py"), DIAR_AUDIO_VALIDATOR_SCRIPT);
+        let _ = std::fs::write(diar_dir.join("diagnostics.py"), DIAR_DIAGNOSTICS_SCRIPT);
+        let _ = std::fs::write(diar_dir.join("model_manager.py"), DIAR_MODEL_MANAGER_SCRIPT);
+        let _ = std::fs::write(diar_dir.join("diarization_service.py"), DIAR_SERVICE_SCRIPT);
+        let _ = std::fs::write(diar_dir.join("reconciler.py"), DIAR_RECONCILER_SCRIPT);
+        let _ = std::fs::write(diar_dir.join("self_test.py"), DIAR_SELF_TEST_SCRIPT);
+
         let runner_path = temp_dir.join("whisper_runner.py");
         let _ = std::fs::write(&runner_path, RUNNER_SCRIPT);
 
@@ -1029,9 +1049,11 @@ async fn transcribir_audio_whisper(
         };
 
         let mut cmd = Command::new(&info.python_ruta);
+        let mut python_path_entries = vec![temp_dir.to_string_lossy().to_string()];
         if !info.site_packages_ruta.is_empty() {
-            cmd.env("PYTHONPATH", &info.site_packages_ruta);
+            python_path_entries.push(info.site_packages_ruta.clone());
         }
+        cmd.env("PYTHONPATH", python_path_entries.join(";"));
         if !info.whisper_cli_ruta.is_empty() {
             if let Some(scripts_dir) = Path::new(&info.whisper_cli_ruta).parent() {
                 if let Ok(curr_path) = std::env::var("PATH") {

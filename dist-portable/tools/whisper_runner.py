@@ -37,6 +37,34 @@ import numpy as np
 # Suprimir advertencias de librerías para garantizar que no contaminen la salida
 warnings.filterwarnings("ignore")
 
+# Importación del subsistema modular de diarización pyannote / reconciliador
+try:
+    from tools.diarization import (
+        PyannoteDiarizationService,
+        DiarizationReconciler,
+        DiarizationModelManager,
+        EnvironmentDiagnostics,
+        AudioValidator,
+        DiarizationResult,
+    )
+except ImportError:
+    try:
+        from diarization import (
+            PyannoteDiarizationService,
+            DiarizationReconciler,
+            DiarizationModelManager,
+            EnvironmentDiagnostics,
+            AudioValidator,
+            DiarizationResult,
+        )
+    except ImportError:
+        PyannoteDiarizationService = None
+        DiarizationReconciler = None
+        DiarizationModelManager = None
+        EnvironmentDiagnostics = None
+        AudioValidator = None
+        DiarizationResult = None
+
 # ---------------------------------------------------------------------------
 # Corrección de Ortografía y Puntuación Pericial
 # ---------------------------------------------------------------------------
@@ -1193,7 +1221,47 @@ def transcribir(file_path: str, model_name: str, language: str,
     except Exception:
         pass
 
-    print(f"[whisper_runner] ETAPA 3/4: Diarizando segmentos y discriminando interlocutores...", file=sys.stderr, flush=True)
+    # ── ETAPA 3/4: Diarización de interlocutores ──────────────────────────────
+    usar_pyannote = False
+    diar_result_pyannote = None
+
+    if PyannoteDiarizationService is not None and DiarizationModelManager is not None:
+        try:
+            if DiarizationModelManager.existe_modelo_local() or DiarizationModelManager.obtener_token():
+                print(f"[whisper_runner] ETAPA 3/4: Ejecutando diarización neuronal con pyannote.audio 4.x (community-1)...", file=sys.stderr, flush=True)
+                service = PyannoteDiarizationService()
+                diar_result_pyannote = service.diarizar(
+                    audio_path=file_path,
+                    num_speakers=num_speakers if num_speakers > 0 else None,
+                    device_override=device
+                )
+                usar_pyannote = True
+                print(f"[whisper_runner] Diarización pyannote completada con éxito ({diar_result_pyannote.num_speakers} interlocutores confirmados).", file=sys.stderr, flush=True)
+        except Exception as e_pyannote:
+            print(f"[whisper_runner] Aviso en pyannote.audio: {e_pyannote}. Recurriendo al motor acústico espectral de respaldo...", file=sys.stderr, flush=True)
+            usar_pyannote = False
+
+    if usar_pyannote and diar_result_pyannote is not None:
+        # Reconciliación desacoplada Whisper (texto) + pyannote (hablantes y tiempos)
+        print(f"[whisper_runner] ETAPA 4/4: Reconciliando transcripción con diarización exclusiva y estructurando expediente...", file=sys.stderr, flush=True)
+        mock_whisper_res = {
+            "segments": segments_raw,
+            "language": detected_language,
+            "modelUsed": resolved_model,
+            "durationSeconds": duration,
+        }
+        reconciled = DiarizationReconciler.reconciliar(
+            whisper_result=mock_whisper_res,
+            diarization_result=diar_result_pyannote,
+        )
+        final_dict = reconciled.to_dict()
+        # Pulir puntuación y ortografía pericial en cada intervención
+        for seg in final_dict.get("segments", []):
+            seg["text"] = corregir_puntuacion_y_ortografia(seg.get("text", ""), idioma=detected_language)
+        return final_dict
+
+    # Motor de respaldo: Diarización heurística espectral de alta resolución
+    print(f"[whisper_runner] ETAPA 3/4: Diarizando segmentos con motor acústico espectral...", file=sys.stderr, flush=True)
     diarized = diarizar_segmentos(segments_raw, audio_np=audio_np,
                                   sample_rate=16000, num_speakers_forzado=num_speakers)
 
