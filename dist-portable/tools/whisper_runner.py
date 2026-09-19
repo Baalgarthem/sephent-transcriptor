@@ -412,6 +412,145 @@ def _distancia_minima_centroides(X: np.ndarray, labels: np.ndarray) -> float:
     return float(np.min(ssd.pdist(centroids, metric='cosine')))
 
 
+def _construir_perfiles_voz(X: np.ndarray, labels: np.ndarray,
+                             duraciones: np.ndarray) -> dict:
+    """
+    Construye perfiles de voz robustos ponderados por duración del segmento.
+
+    Los segmentos cortos (p.ej. transiciones, vocativos breves) aportan menos
+    al centroide del hablante que segmentos largos, donde la voz es más estable
+    y representativa del tracto vocal de la persona.
+
+    Pesos:
+      - < 0.3 s  → peso 0.10 (casi descartado — muy breve, posiblemente ruidoso)
+      - 0.3–1.0 s → peso 0.40 (contribución parcial)
+      - 1.0–3.0 s → peso 1.00 (contribución normal)
+      - > 3.0 s  → peso 1.30 (segmento largo — perfil más fiable)
+
+    Retorna dict { cluster_id: {'centroide': np.ndarray, 'n': int,
+                                 'peso_total': float, 'variance': float} }
+    """
+    perfiles = {}
+    for cid in np.unique(labels):
+        mask = (labels == cid)
+        durs = duraciones[mask]
+        pesos = np.where(durs < 0.3, 0.10,
+                np.where(durs < 1.0, 0.40,
+                np.where(durs < 3.0, 1.00, 1.30)))
+        total_peso = float(np.sum(pesos))
+        if total_peso < 1e-6:
+            continue
+        X_cluster = X[mask]
+        centroide = np.average(X_cluster, axis=0, weights=pesos)
+        norma = np.linalg.norm(centroide)
+        if norma > 1e-7:
+            centroide = centroide / norma
+        # Varianza intra-cluster (compacidad del perfil)
+        diffs = X_cluster - centroide
+        variance = float(np.mean(np.sum(diffs ** 2, axis=1) * pesos) / total_peso)
+        perfiles[int(cid)] = {
+            'centroide': centroide,
+            'n': int(np.sum(mask)),
+            'peso_total': total_peso,
+            'variance': variance,
+        }
+    return perfiles
+
+
+def _asignar_con_confianza(X: np.ndarray, perfiles: dict,
+                            genders: list, hay_bimodalidad: bool,
+                            male_cluster_ids: set,
+                            female_cluster_ids: set) -> tuple:
+    """
+    Reasigna cada segmento al perfil de voz más similar con puntuación de confianza.
+
+    - Respeta la restricción de género si hay bimodalidad detectada (Candado de Género).
+    - La confianza mide la separación entre el mejor y segundo mejor candidato.
+    - Un valor de confianza bajo indica que el segmento está acústicamente "entre"
+      dos perfiles — candidato a corrección por suavizado temporal.
+
+    Retorna (new_labels: np.ndarray, confidence_scores: np.ndarray)
+    """
+    N = len(X)
+    new_labels = np.zeros(N, dtype=int)
+    confidence_scores = np.zeros(N, dtype=float)
+
+    cluster_ids = list(perfiles.keys())
+    if not cluster_ids:
+        return np.ones(N, dtype=int), np.ones(N, dtype=float)
+
+    for i in range(N):
+        g = genders[i]
+
+        # Filtrar candidatos por género si la bimodalidad fue confirmada
+        if hay_bimodalidad and male_cluster_ids and female_cluster_ids:
+            if g < -0.15:
+                candidatos_ids = [cid for cid in cluster_ids if cid in male_cluster_ids] or cluster_ids
+            else:
+                candidatos_ids = [cid for cid in cluster_ids if cid in female_cluster_ids] or cluster_ids
+        else:
+            candidatos_ids = cluster_ids
+
+        # Calcular similitud coseno con cada perfil candidato
+        sims = [(cid, float(np.dot(X[i], perfiles[cid]['centroide'])))
+                for cid in candidatos_ids]
+        sims.sort(key=lambda x: x[1], reverse=True)
+
+        best_cid, best_sim = sims[0]
+        new_labels[i] = best_cid
+
+        # Confianza: brecha normalizada entre 1er y 2do candidato
+        if len(sims) > 1:
+            second_sim = sims[1][1]
+            gap = max(0.0, best_sim - second_sim)
+            # Normalizar: gap de 0.30 o más → confianza 1.0 (muy seguro)
+            confidence_scores[i] = min(1.0, gap / 0.30)
+        else:
+            confidence_scores[i] = 1.0
+
+    return new_labels, confidence_scores
+
+
+def _suavizar_por_contexto_temporal(labels: np.ndarray,
+                                     confidence_scores: np.ndarray,
+                                     ventana: int = 3,
+                                     umbral_confianza: float = 0.22) -> np.ndarray:
+    """
+    Suaviza las asignaciones de hablante usando contexto temporal.
+
+    Para segmentos con baja confianza (umbral_confianza), si sus vecinos
+    cercanos (±ventana) coinciden mayoritariamente en un mismo hablante,
+    se adopta ese hablante en lugar del asignado por el clustering puro.
+
+    Esto corrige el caso más frecuente de error: un segmento breve de
+    transición entre dos hablantes hereda características mixtas de ambas
+    voces y se asigna incorrectamente; sus vecinos (que tienen voz más
+    estable) votan y corrigen la asignación.
+
+    Iteración doble para propagar correcciones en cadena.
+    """
+    from collections import Counter
+    N = len(labels)
+    smoothed = labels.copy()
+
+    for _paso in range(2):  # Dos pasadas para propagar correcciones encadenadas
+        prev = smoothed.copy()
+        for i in range(N):
+            if confidence_scores[i] < umbral_confianza:
+                # Recoger etiquetas de vecinos con confianza aceptable
+                vecinos = []
+                for j in range(max(0, i - ventana), min(N, i + ventana + 1)):
+                    if j != i and confidence_scores[j] >= umbral_confianza:
+                        vecinos.append(int(prev[j]))
+                if vecinos:
+                    voto_mayoritario = Counter(vecinos).most_common(1)[0][0]
+                    smoothed[i] = voto_mayoritario
+                    # Elevar confianza para no seguir siendo corregido en el 2do paso
+                    confidence_scores[i] = umbral_confianza
+
+    return smoothed
+
+
 def determinar_clusters_optimos(X_sub: np.ndarray, max_k: int = 6,
                                 min_dist_c: float = 0.15, min_sil: float = 0.16) -> np.ndarray:
     """
@@ -465,15 +604,23 @@ def determinar_clusters_optimos(X_sub: np.ndarray, max_k: int = 6,
 def diarizar_segmentos(segmentos_whisper: list, audio_np: np.ndarray = None,
                        sample_rate: int = 16000, num_speakers_forzado: int = 0) -> list:
     """
-    Identifica y diferencia a los interlocutores mediante clustering jerárquico enriquecido:
-      - Candado 1: Bimodalidad de género (hombres vs mujeres estrictamente separados).
-      - Candado 2: Diferenciación intra-género (múltiples entrevistadas intercaladas al azar).
-      - Candado 3: Re-identificación global por centroides (mantiene la identidad de personas
-                   que aparecen al inicio, en medio y al final).
-      - Candado 4: Preservación de monólogo cuando solo una voz está presente.
+    Identifica y diferencia interlocutores con pipeline de 5 pasadas:
 
-    v0.2.0: Usa AudioFFTCache para reusar la FFT global del audio y acelerar la extracción
-            de vectores acústicos (reduce I/O de CPU significativamente en audios largos).
+      Pasada 1 — Extracción de vectores acústicos (MFCC + F0 + bandas + género)
+      Pasada 2 — Clustering inicial bimodal de género + jerárquico intra-género
+      Pasada 3 — Construcción de perfiles de voz ponderados por duración
+      Pasada 4 — Reasignación con confianza + Candado de Género + suavizado temporal
+      Pasada 5 — Mapeo cronológico (primer hablante = speaker_01)
+
+    Candados activos:
+      C1. Bimodalidad de género — hombres y mujeres nunca comparten cluster
+      C2. Diferenciación intra-género — hasta 8 perfiles femeninos independientes
+      C3. Perfiles de voz ponderados por duración — segmentos cortos pesan menos
+      C4. Confianza de asignación — segmentos ambiguos se corrigen por contexto
+      C5. Suavizado temporal — votos de vecinos corrigen transiciones erróneas
+      C6. Voces solapadas — se preservan sin forzar separación artificial
+
+    v0.2.3: pipeline de 5 pasadas, perfiles ponderados, corrección por contexto temporal.
     """
     if not segmentos_whisper:
         return []
@@ -484,27 +631,27 @@ def diarizar_segmentos(segmentos_whisper: list, audio_np: np.ndarray = None,
     if len(segmentos_whisper) == 1:
         return [{**segmentos_whisper[0], "speakerId": "speaker_01"}]
 
-    # Precalcular cache FFT global para reutilizar en extracción de vectores
+    # ── PASADA 1: Extracción de vectores acústicos ────────────────────────────
     fft_cache = None
     try:
-        if audio_np is not None and len(audio_np) > 0:
-            fft_cache = AudioFFTCache(audio_np, sample_rate)
+        fft_cache = AudioFFTCache(audio_np, sample_rate)
     except Exception:
         fft_cache = None
 
-    # 1. Extraer vector de huella vocal, f0 y género para cada segmento
     vectores = []
     genders = []
-    f0s = []
+    duraciones = []
     for seg in segmentos_whisper:
         start_idx = max(0, int(seg["start"] * sample_rate))
         end_idx = min(len(audio_np), int(seg["end"] * sample_rate))
+        dur = float(seg.get("end", 0.0)) - float(seg.get("start", 0.0))
+        duraciones.append(max(0.0, dur))
         if end_idx - start_idx < 320:
             chunk = np.zeros(400, dtype=np.float32)
-            vec, f0_val, g_score = extraer_vector_acustico(chunk, sample_rate)
+            vec, _, g_score = extraer_vector_acustico(chunk, sample_rate)
         else:
             chunk = audio_np[start_idx:end_idx]
-            vec, f0_val, g_score = extraer_vector_acustico(
+            vec, _, g_score = extraer_vector_acustico(
                 chunk, sample_rate,
                 fft_cache=fft_cache,
                 chunk_start_idx=start_idx,
@@ -512,16 +659,22 @@ def diarizar_segmentos(segmentos_whisper: list, audio_np: np.ndarray = None,
             )
         vectores.append(vec)
         genders.append(g_score)
-        f0s.append(f0_val)
 
     X = np.array(vectores, dtype=np.float32)
+    duraciones = np.array(duraciones, dtype=np.float32)
     N = len(segmentos_whisper)
     raw_labels = np.ones(N, dtype=int)
+
+    # Variables de estado para las pasadas posteriores
+    hay_bimodalidad = False
+    male_cluster_ids: set = set()
+    female_cluster_ids: set = set()
 
     try:
         import scipy.cluster.hierarchy as sch
         import scipy.spatial.distance as ssd
 
+        # ── PASADA 2: Clustering inicial ──────────────────────────────────────
         if num_speakers_forzado >= 2:
             p_dist = ssd.pdist(X, metric='cosine')
             p_dist = np.nan_to_num(p_dist, nan=0.0)
@@ -529,71 +682,83 @@ def diarizar_segmentos(segmentos_whisper: list, audio_np: np.ndarray = None,
             k = min(num_speakers_forzado, N)
             raw_labels = sch.fcluster(Z, t=k, criterion='maxclust')
         else:
-            # 2. Análisis de Candado de Género Bimodal
-            # Identificar si conviven voces masculinas (< -0.15) y femeninas (> 0.10)
             male_indices = [i for i, g in enumerate(genders) if g < -0.15]
             female_indices = [i for i, g in enumerate(genders) if g >= -0.15]
 
-            # Solo activar partición bimodal si hay clara presencia de ambos géneros
-            hay_bimodalidad = len(male_indices) >= 1 and len(female_indices) >= 1 and \
-                              (len(male_indices) / N >= 0.08) and (len(female_indices) / N >= 0.08)
+            hay_bimodalidad = (
+                len(male_indices) >= 1 and len(female_indices) >= 1
+                and (len(male_indices) / N >= 0.08)
+                and (len(female_indices) / N >= 0.08)
+            )
 
             if hay_bimodalidad:
-                print(f"[whisper_runner] Bimodalidad detectada: {len(male_indices)} intervenciones masculinas, {len(female_indices)} femeninas.", file=sys.stderr)
-
-                # A. Clustering en el grupo masculino (ej. entrevistador u otros hombres)
-                X_male = X[male_indices]
-                labels_male = determinar_clusters_optimos(X_male, max_k=min(4, len(male_indices)),
-                                                          min_dist_c=0.18, min_sil=0.18)
-
-                # B. Clustering en el grupo femenino (múltiples entrevistadas que alternan)
-                X_female = X[female_indices]
-                labels_female = determinar_clusters_optimos(X_female, max_k=min(8, len(female_indices)),
-                                                            min_dist_c=0.14, min_sil=0.15)
-
-                # Asignar etiquetas globales asegurando que no colisionen
+                print(
+                    f"[whisper_runner] Bimodalidad detectada: "
+                    f"{len(male_indices)} intervenciones masculinas, "
+                    f"{len(female_indices)} femeninas.",
+                    file=sys.stderr
+                )
+                X_male = X[np.array(male_indices)]
+                labels_male = determinar_clusters_optimos(
+                    X_male, max_k=min(4, len(male_indices)),
+                    min_dist_c=0.18, min_sil=0.18
+                )
+                X_female = X[np.array(female_indices)]
+                labels_female = determinar_clusters_optimos(
+                    X_female, max_k=min(8, len(female_indices)),
+                    min_dist_c=0.14, min_sil=0.15
+                )
                 offset_female = int(np.max(labels_male)) + 1 if len(labels_male) > 0 else 1
                 for idx_m, lbl_m in zip(male_indices, labels_male):
                     raw_labels[idx_m] = int(lbl_m)
                 for idx_f, lbl_f in zip(female_indices, labels_female):
                     raw_labels[idx_f] = int(lbl_f) + offset_female
+
+                # Registrar qué cluster IDs son masculinos / femeninos
+                male_cluster_ids = set(int(raw_labels[i]) for i in male_indices)
+                female_cluster_ids = set(int(raw_labels[i]) for i in female_indices)
             else:
-                # Caso unimodal (todos hombres o todas mujeres): clustering jerárquico adaptativo
-                raw_labels = determinar_clusters_optimos(X, max_k=min(8, N),
-                                                         min_dist_c=0.16, min_sil=0.18)
+                raw_labels = determinar_clusters_optimos(
+                    X, max_k=min(8, N),
+                    min_dist_c=0.16, min_sil=0.18
+                )
 
-        # 3. Candado de Re-Identificación Global por Centroides (Alineación No Consecutiva)
-        # Permite que una entrevistada que habló al inicio y reaparece al final sea agrupada fielmente
-        unique_clusters = np.unique(raw_labels)
-        if len(unique_clusters) > 1:
-            centroids = {}
-            for cid in unique_clusters:
-                pts = X[raw_labels == cid]
-                c = np.mean(pts, axis=0)
-                c_norm = np.linalg.norm(c)
-                if c_norm > 1e-7:
-                    c = c / c_norm
-                centroids[cid] = c
+        # ── PASADA 3: Perfiles de voz ponderados por duración ─────────────────
+        # Los segmentos breves (transiciones) aportan menos al perfil del hablante
+        perfiles = _construir_perfiles_voz(X, raw_labels, duraciones)
 
-            # Reasignar cada segmento a su centroide más afín dentro de su compatibilidad de género
-            for i in range(N):
-                candidatos_reid = []
-                for cid, c_vec in centroids.items():
-                    cos_sim = float(np.dot(X[i], c_vec))
-                    candidatos_reid.append((cid, cos_sim))
+        if len(perfiles) > 1:
+            # ── PASADA 4A: Reasignación con confianza + Candado de Género ─────
+            raw_labels, confidence_scores = _asignar_con_confianza(
+                X, perfiles, genders, hay_bimodalidad,
+                male_cluster_ids, female_cluster_ids
+            )
 
-                candidatos_reid.sort(key=lambda item: item[1], reverse=True)
-                mejor_cid, mejor_sim = candidatos_reid[0]
-                if mejor_sim >= 0.75:  # Similaridad coseno alta
-                    raw_labels[i] = mejor_cid
+            # ── PASADA 4B: Suavizado temporal ─────────────────────────────────
+            # Corrige segmentos en transiciones que quedaron mal asignados
+            # porque su vector acústico mezcla características de dos hablantes
+            raw_labels = _suavizar_por_contexto_temporal(
+                raw_labels, confidence_scores,
+                ventana=3, umbral_confianza=0.22
+            )
+
+            n_bajo_confianza = int(np.sum(confidence_scores < 0.22))
+            if n_bajo_confianza > 0:
+                print(
+                    f"[whisper_runner] Suavizado temporal: {n_bajo_confianza} segmento(s) "
+                    f"corregidos por contexto de vecinos.",
+                    file=sys.stderr
+                )
 
     except Exception as err:
         print(f"[whisper_runner] Aviso en clustering acústico: {err}", file=sys.stderr)
         raw_labels = np.ones(N, dtype=int)
 
-    # 4. Mapeo cronológico ceremonial:
-    # El primer interlocutor en intervenir es speaker_01 (Persona 1), el segundo speaker_02, etc.
-    mapa_hablantes = {}
+    # ── PASADA 5: Mapeo cronológico ───────────────────────────────────────────
+    # El primer interlocutor en intervenir es speaker_01, el segundo speaker_02, etc.
+    # Los segmentos con timestamps solapados de diferentes hablantes se preservan
+    # sin modificación (voz simultánea válida — Candado C6).
+    mapa_hablantes: dict = {}
     hablante_contador = 1
     resultado = []
 
@@ -602,11 +767,12 @@ def diarizar_segmentos(segmentos_whisper: list, audio_np: np.ndarray = None,
         if cluster_id not in mapa_hablantes:
             mapa_hablantes[cluster_id] = f"speaker_{hablante_contador:02d}"
             hablante_contador += 1
+        resultado.append({**seg, "speakerId": mapa_hablantes[cluster_id]})
 
-        speaker_id = mapa_hablantes[cluster_id]
-        resultado.append({**seg, "speakerId": speaker_id})
-
-    print(f"[whisper_runner] Interlocutores finales confirmados: {len(mapa_hablantes)}", file=sys.stderr)
+    print(
+        f"[whisper_runner] Interlocutores finales confirmados: {len(mapa_hablantes)}",
+        file=sys.stderr
+    )
     return resultado
 
 
