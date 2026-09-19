@@ -1,7 +1,7 @@
 import React, { useState, useEffect, ChangeEvent, Component, ErrorInfo, ReactNode } from 'react';
 import { ModelManager, ModeloInstaladoInfo, RegistroImportacionBackup, ResumenModelosRutaOficial } from '../services/modelManager';
 import { InformacionRutaOficial } from '../services/whisperPathService';
-import { DependencyManager, EstadoDependenciasSistema } from '../services/dependencyManager';
+import { DependencyManager, EstadoDependenciasSistema, ResumenLibreriasPython, InfoLibreriaPython } from '../services/dependencyManager';
 import { DownloadProgressBar } from './DownloadProgressBar';
 import { WHISPER_MODELS } from '../config/whisperConfig';
 import { THEME_TOKENS } from '../config/themeTokens';
@@ -95,6 +95,67 @@ const ModelManagerModalContent: React.FC<ModelManagerModalProps> = ({
 
   // Estado para confirmación de eliminación
   const [modeloAEliminar, setModeloAEliminar] = useState<string | null>(null);
+
+  // Estados para la pestaña de gestión de librerías y dependencias
+  const [pestanaActiva, setPestanaActiva] = useState<'modelos' | 'librerias'>('modelos');
+  const [resumenLibrerias, setResumenLibrerias] = useState<ResumenLibreriasPython | null>(null);
+  const [comprobandoLibrerias, setComprobandoLibrerias] = useState<boolean>(false);
+  const [instalandoLibreriaId, setInstalandoLibreriaId] = useState<string | null>(null);
+  const [mensajeLibreria, setMensajeLibreria] = useState<string>('');
+
+  const comprobarLibrerias = async () => {
+    setComprobandoLibrerias(true);
+    setMensajeLibreria('Verificando dependencias instaladas en Python...');
+    try {
+      const res = await DependencyManager.auditarLibreriasDetalladas();
+      setResumenLibrerias(res);
+      setMensajeLibreria(
+        res.todas_instaladas
+          ? '✓ Todas las librerías esenciales están instaladas y operativas en el sistema.'
+          : '⚠️ Se encontraron librerías pendientes de instalación.'
+      );
+    } catch (err: any) {
+      setMensajeLibreria(`Aviso al auditar librerías: ${err?.message || err}`);
+    } finally {
+      setComprobandoLibrerias(false);
+    }
+  };
+
+  const handleInstalarLibreriaIndividual = async (paquetePip: string, id: string) => {
+    setInstalandoLibreriaId(id);
+    setMensajeLibreria(`Instalando ${paquetePip} en segundo plano con pip...`);
+    try {
+      const res = await DependencyManager.instalarLibreria(paquetePip);
+      if (res.exito) {
+        setMensajeLibreria(`✓ ${paquetePip} se ha instalado correctamente.`);
+        await comprobarLibrerias();
+      } else {
+        setMensajeLibreria(`❌ ${res.mensaje}`);
+      }
+    } catch (err: any) {
+      setMensajeLibreria(`❌ Error: ${err?.message || err}`);
+    } finally {
+      setInstalandoLibreriaId(null);
+    }
+  };
+
+  const handleInstalarTodasFaltantes = async () => {
+    if (!resumenLibrerias) return;
+    const faltantes = resumenLibrerias.librerias.filter((l) => !l.instalada);
+    if (faltantes.length === 0) {
+      setMensajeLibreria('Todas las librerías ya están instaladas.');
+      return;
+    }
+
+    setComprobandoLibrerias(true);
+    for (const lib of faltantes) {
+      setInstalandoLibreriaId(lib.id);
+      setMensajeLibreria(`Instalando ${lib.nombre} (${lib.paquetePip})...`);
+      await DependencyManager.instalarLibreria(lib.paquetePip);
+    }
+    setInstalandoLibreriaId(null);
+    await comprobarLibrerias();
+  };
 
   const recargarEstado = () => {
     try {
@@ -581,6 +642,77 @@ const ModelManagerModalContent: React.FC<ModelManagerModalProps> = ({
         {/* Cuerpo con scroll */}
         <div className="modal-body" style={{ backgroundColor: THEME_TOKENS.colors.bgCanvas }}>
 
+          {/* Selector de Pestañas: Modelos vs Librerías de Diarización */}
+          <div
+            style={{
+              display: 'flex',
+              gap: '0.5rem',
+              marginBottom: '1.25rem',
+              borderBottom: `1px solid ${THEME_TOKENS.colors.borderSubtle}`,
+              paddingBottom: '0.65rem',
+            }}
+          >
+            <button
+              onClick={() => setPestanaActiva('modelos')}
+              style={{
+                padding: '0.45rem 1.15rem',
+                borderRadius: THEME_TOKENS.radii.sm,
+                backgroundColor: pestanaActiva === 'modelos' ? THEME_TOKENS.colors.surfaceDark : THEME_TOKENS.colors.surfaceBase,
+                color: pestanaActiva === 'modelos' ? '#ffffff' : THEME_TOKENS.colors.textPrimary,
+                border: `1px solid ${pestanaActiva === 'modelos' ? THEME_TOKENS.colors.surfaceDark : THEME_TOKENS.colors.borderStrong}`,
+                fontWeight: 600,
+                cursor: 'pointer',
+                fontSize: '0.825rem',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.4rem',
+                transition: 'all 0.15s ease',
+              }}
+            >
+              <span>🧠</span> Modelos Whisper ({resumen?.totalDescargados ?? 0}/{resumen?.totalCatalogo ?? 6})
+            </button>
+            <button
+              onClick={() => {
+                setPestanaActiva('librerias');
+                if (!resumenLibrerias) {
+                  comprobarLibrerias();
+                }
+              }}
+              style={{
+                padding: '0.45rem 1.15rem',
+                borderRadius: THEME_TOKENS.radii.sm,
+                backgroundColor: pestanaActiva === 'librerias' ? THEME_TOKENS.colors.surfaceDark : THEME_TOKENS.colors.surfaceBase,
+                color: pestanaActiva === 'librerias' ? '#ffffff' : THEME_TOKENS.colors.textPrimary,
+                border: `1px solid ${pestanaActiva === 'librerias' ? THEME_TOKENS.colors.surfaceDark : THEME_TOKENS.colors.borderStrong}`,
+                fontWeight: 600,
+                cursor: 'pointer',
+                fontSize: '0.825rem',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.4rem',
+                transition: 'all 0.15s ease',
+              }}
+            >
+              <span>📦</span> Librerías y Diarización
+              {resumenLibrerias && !resumenLibrerias.todas_instaladas && (
+                <span
+                  style={{
+                    backgroundColor: '#e11d48',
+                    color: '#fff',
+                    fontSize: '0.65rem',
+                    fontWeight: 700,
+                    padding: '0.05rem 0.35rem',
+                    borderRadius: '8px',
+                  }}
+                >
+                  !
+                </span>
+              )}
+            </button>
+          </div>
+
+          {pestanaActiva === 'modelos' && (
+            <>
           {/* Testigo Estático de Disponibilidad de OpenAI Whisper */}
           <div
             style={{
@@ -1207,6 +1339,229 @@ const ModelManagerModalContent: React.FC<ModelManagerModalProps> = ({
               );
             })}
           </div>
+            </>
+          )}
+
+          {/* Pestaña: Gestión de Librerías y Motor de Diarización */}
+          {pestanaActiva === 'librerias' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              {/* Cabecera del Entorno Python */}
+              <div
+                style={{
+                  backgroundColor: THEME_TOKENS.colors.surfaceBase,
+                  border: `1px solid ${THEME_TOKENS.colors.borderSubtle}`,
+                  borderRadius: THEME_TOKENS.radii.md,
+                  padding: '1.15rem',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  flexWrap: 'wrap',
+                  gap: '0.75rem',
+                  boxShadow: THEME_TOKENS.shadows.sm,
+                }}
+              >
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <span style={{ fontSize: '1.25rem' }}>🐍</span>
+                    <strong style={{ fontSize: '0.95rem', color: THEME_TOKENS.colors.textPrimary }}>
+                      Entorno de Ejecución de Python
+                    </strong>
+                  </div>
+                  <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.8rem', color: THEME_TOKENS.colors.textSecondary }}>
+                    Intérprete:{' '}
+                    <code>
+                      {resumenLibrerias?.python_ruta || estadoDeps.pythonRuta || 'Detectando en sistema...'}
+                    </code>{' '}
+                    ({resumenLibrerias?.python_version || estadoDeps.pythonVersion || 'v3.x'})
+                  </p>
+                </div>
+
+                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                  <button
+                    onClick={comprobarLibrerias}
+                    disabled={comprobandoLibrerias}
+                    style={{
+                      backgroundColor: THEME_TOKENS.colors.surfaceBase,
+                      border: `1px solid ${THEME_TOKENS.colors.borderStrong}`,
+                      color: THEME_TOKENS.colors.textPrimary,
+                      padding: '0.45rem 1rem',
+                      borderRadius: THEME_TOKENS.radii.sm,
+                      fontSize: '0.8rem',
+                      fontWeight: 600,
+                      cursor: comprobandoLibrerias ? 'wait' : 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.35rem',
+                    }}
+                  >
+                    <span>{comprobandoLibrerias ? '⏳' : '🔍'}</span>
+                    {comprobandoLibrerias ? 'Comprobando...' : 'Comprobar Dependencias'}
+                  </button>
+
+                  {resumenLibrerias && !resumenLibrerias.todas_instaladas && (
+                    <button
+                      onClick={handleInstalarTodasFaltantes}
+                      disabled={comprobandoLibrerias || !!instalandoLibreriaId}
+                      style={{
+                        backgroundColor: '#e11d48',
+                        color: '#ffffff',
+                        border: 'none',
+                        padding: '0.45rem 1rem',
+                        borderRadius: THEME_TOKENS.radii.sm,
+                        fontSize: '0.8rem',
+                        fontWeight: 700,
+                        cursor: (comprobandoLibrerias || !!instalandoLibreriaId) ? 'wait' : 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.35rem',
+                        boxShadow: THEME_TOKENS.shadows.sm,
+                      }}
+                    >
+                      <span>⬇️</span> Instalar Dependencias Faltantes
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Mensaje de Estado / Notificación */}
+              {mensajeLibreria && (
+                <div
+                  style={{
+                    backgroundColor: mensajeLibreria.includes('✓') ? '#f0fdf4' : '#fef3c7',
+                    border: `1px solid ${mensajeLibreria.includes('✓') ? '#bbf7d0' : '#fde68a'}`,
+                    color: mensajeLibreria.includes('✓') ? '#166534' : '#92400e',
+                    padding: '0.6rem 0.9rem',
+                    borderRadius: THEME_TOKENS.radii.sm,
+                    fontSize: '0.8rem',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.5rem',
+                  }}
+                >
+                  <span>{mensajeLibreria.includes('✓') ? '✓' : 'ℹ️'}</span>
+                  <span>{mensajeLibreria}</span>
+                </div>
+              )}
+
+              {/* Tarjeta explicativa de Diarización Acústica */}
+              <div
+                style={{
+                  backgroundColor: THEME_TOKENS.colors.accentTaupeBg,
+                  border: `1px solid ${THEME_TOKENS.colors.borderSubtle}`,
+                  borderRadius: THEME_TOKENS.radii.md,
+                  padding: '0.85rem 1.15rem',
+                  fontSize: '0.8rem',
+                  color: THEME_TOKENS.colors.textSecondary,
+                  lineHeight: 1.45,
+                }}
+              >
+                <strong style={{ color: THEME_TOKENS.colors.textPrimary, display: 'block', marginBottom: '0.25rem' }}>
+                  🎙️ Motor de Diarización Acústica (Identificación de Personas)
+                </strong>
+                OpenAI Whisper transcribe con precisión fonética y temporal. La separación e identificación de voces
+                (<em>"Persona 1"</em>, <em>"Persona 2"</em>, etc.) se procesa extrayendo coeficientes tímbricos (<strong>MFCC</strong>),
+                tono fundamental (<strong>Pitch F0</strong>) y agrupamiento jerárquico de huellas de voz mediante <strong>TorchAudio</strong> y <strong>SciPy</strong>.
+              </div>
+
+              {/* Listado de Librerías */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
+                {(resumenLibrerias?.librerias || [
+                  { id: 'openai-whisper', paquetePip: 'openai-whisper', module: 'whisper', nombre: 'OpenAI Whisper', desc: 'Motor base para la transcripción acústica de audio y video', rol: 'Transcripción ASR', obligatoria: true, instalada: estadoDeps.whisperInstalado, version: estadoDeps.whisperVersion || 'Disponible' },
+                  { id: 'torch', paquetePip: 'torch', module: 'torch', nombre: 'PyTorch (Torch)', desc: 'Motor tensorial y aceleración para inferencia de redes neuronales', rol: 'Inferencia Neuronal', obligatoria: true, instalada: estadoDeps.torchInstalado || false, version: estadoDeps.torchVersion || 'Disponible' },
+                  { id: 'torchaudio', paquetePip: 'torchaudio', module: 'torchaudio', nombre: 'TorchAudio', desc: 'Extracción espectral, banco de filtros Mel y coeficientes MFCC', rol: 'Procesamiento Acústico', obligatoria: true, instalada: true, version: 'Disponible' },
+                  { id: 'scipy', paquetePip: 'scipy', module: 'scipy', nombre: 'SciPy', desc: 'Análisis matemático de señales, distancias de coseno y clustering', rol: 'Diarización y Clustering', obligatoria: true, instalada: true, version: 'Disponible' },
+                  { id: 'scikit-learn', paquetePip: 'scikit-learn', module: 'sklearn', nombre: 'Scikit-Learn', desc: 'Algoritmos avanzados de agrupamiento espectral y separación de hablantes', rol: 'Diarización Pericial', obligatoria: false, instalada: false, version: 'No instalada' },
+                  { id: 'soundfile', paquetePip: 'soundfile', module: 'soundfile', nombre: 'SoundFile', desc: 'Decodificación precisa de audio multiformato y streaming PCM', rol: 'Decodificación de Audio', obligatoria: false, instalada: true, version: 'Disponible' }
+                ]).map((lib) => {
+                  const estaInstalada = lib.instalada;
+                  const estaInstalando = instalandoLibreriaId === lib.id;
+                  return (
+                    <div
+                      key={lib.id}
+                      style={{
+                        backgroundColor: THEME_TOKENS.colors.surfaceBase,
+                        border: `1px solid ${estaInstalada ? THEME_TOKENS.colors.borderSubtle : '#fecaca'}`,
+                        borderRadius: THEME_TOKENS.radii.sm,
+                        padding: '0.85rem 1rem',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        flexWrap: 'wrap',
+                        gap: '0.75rem',
+                      }}
+                    >
+                      <div style={{ flex: 1, minWidth: '220px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                          <strong style={{ fontSize: '0.875rem', color: THEME_TOKENS.colors.textPrimary }}>
+                            {lib.nombre}
+                          </strong>
+                          <span
+                            style={{
+                              fontSize: '0.6875rem',
+                              padding: '0.1rem 0.45rem',
+                              borderRadius: '4px',
+                              backgroundColor: THEME_TOKENS.colors.bgSecondary,
+                              color: THEME_TOKENS.colors.textSecondary,
+                              border: `1px solid ${THEME_TOKENS.colors.borderSubtle}`,
+                            }}
+                          >
+                            {lib.rol}
+                          </span>
+                          {lib.obligatoria && (
+                            <span style={{ fontSize: '0.65rem', color: '#b91c1c', fontWeight: 600 }}>
+                              *Requerida
+                            </span>
+                          )}
+                        </div>
+                        <p style={{ margin: '0.2rem 0 0 0', fontSize: '0.775rem', color: THEME_TOKENS.colors.textSecondary }}>
+                          {lib.desc} <span style={{ fontFamily: THEME_TOKENS.fonts.mono, color: THEME_TOKENS.colors.textMuted }}>({lib.paquetePip})</span>
+                        </p>
+                      </div>
+
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                        <span
+                          style={{
+                            fontSize: '0.75rem',
+                            fontWeight: 600,
+                            color: estaInstalada ? '#166534' : '#b91c1c',
+                            backgroundColor: estaInstalada ? '#dcfce7' : '#fee2e2',
+                            padding: '0.25rem 0.6rem',
+                            borderRadius: THEME_TOKENS.radii.xs,
+                            border: `1px solid ${estaInstalada ? '#bbf7d0' : '#fecaca'}`,
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.3rem',
+                          }}
+                        >
+                          <span>{estaInstalada ? '✓' : '⚠️'}</span>
+                          <span>{estaInstalada ? `v${lib.version}` : 'No instalada'}</span>
+                        </span>
+
+                        {!estaInstalada && (
+                          <button
+                            onClick={() => handleInstalarLibreriaIndividual(lib.paquetePip, lib.id)}
+                            disabled={estaInstalando || comprobandoLibrerias}
+                            style={{
+                              backgroundColor: THEME_TOKENS.colors.surfaceDark,
+                              color: '#ffffff',
+                              border: 'none',
+                              padding: '0.35rem 0.75rem',
+                              borderRadius: THEME_TOKENS.radii.xs,
+                              fontSize: '0.75rem',
+                              fontWeight: 600,
+                              cursor: estaInstalando ? 'wait' : 'pointer',
+                            }}
+                          >
+                            {estaInstalando ? '⏳ Instalando...' : '⬇ Instalar'}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Pie de modal */}

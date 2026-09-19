@@ -354,5 +354,96 @@ export class DependencyManager {
 
     return { exito: false, mensaje: 'No se pudo comunicar con el entorno nativo de escritorio.' };
   }
+
+  /**
+   * Audita individualmente las librerías críticas de Python (Whisper, Torch, Torchaudio, Scipy, Scikit-learn, etc.)
+   */
+  public static async auditarLibreriasDetalladas(): Promise<ResumenLibreriasPython> {
+    const estadoPorDefecto: ResumenLibreriasPython = {
+      python_instalado: false,
+      python_version: '',
+      python_ruta: '',
+      todas_instaladas: false,
+      librerias: [
+        { id: 'openai-whisper', paquetePip: 'openai-whisper', module: 'whisper', nombre: 'OpenAI Whisper', desc: 'Motor base para la transcripción acústica de audio y video', rol: 'Transcripción ASR', obligatoria: true, instalada: false, version: 'No disponible' },
+        { id: 'torch', paquetePip: 'torch', module: 'torch', nombre: 'PyTorch (Torch)', desc: 'Motor tensorial y aceleración para inferencia de redes neuronales', rol: 'Inferencia Neuronal', obligatoria: true, instalada: false, version: 'No disponible' },
+        { id: 'torchaudio', paquetePip: 'torchaudio', module: 'torchaudio', nombre: 'TorchAudio', desc: 'Extracción espectral, banco de filtros Mel y coeficientes MFCC', rol: 'Procesamiento Acústico', obligatoria: true, instalada: false, version: 'No disponible' },
+        { id: 'scipy', paquetePip: 'scipy', module: 'scipy', nombre: 'SciPy', desc: 'Análisis matemático de señales, distancias de coseno y clustering', rol: 'Diarización y Clustering', obligatoria: true, instalada: false, version: 'No disponible' },
+        { id: 'scikit-learn', paquetePip: 'scikit-learn', module: 'sklearn', nombre: 'Scikit-Learn', desc: 'Algoritmos avanzados de agrupamiento espectral y separación de hablantes', rol: 'Diarización Pericial', obligatoria: false, instalada: false, version: 'No disponible' },
+        { id: 'soundfile', paquetePip: 'soundfile', module: 'soundfile', nombre: 'SoundFile', desc: 'Decodificación precisa de audio multiformato y streaming PCM', rol: 'Decodificación de Audio', obligatoria: false, instalada: false, version: 'No disponible' }
+      ]
+    };
+
+    if (!this.esModoDesktop()) {
+      return estadoPorDefecto;
+    }
+
+    try {
+      const invoker = (typeof window !== 'undefined' && (window as any).__TAURI__?.invoke)
+        ? (window as any).__TAURI__.invoke
+        : invoke;
+      const raw = await invoker('auditar_librerias_python');
+      if (raw) {
+        const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        return {
+          python_instalado: Boolean(parsed.python_instalado),
+          python_version: String(parsed.python_version || ''),
+          python_ruta: String(parsed.python_ruta || ''),
+          todas_instaladas: Boolean(parsed.todas_instaladas),
+          librerias: Array.isArray(parsed.librerias) ? parsed.librerias : estadoPorDefecto.librerias,
+        };
+      }
+    } catch (err) {
+      console.warn('Aviso al auditar librerías detalladas:', err);
+    }
+
+    return estadoPorDefecto;
+  }
+
+  /**
+   * Instala cualquier paquete Python vía pip sin ventana CMD visible
+   */
+  public static async instalarLibreria(
+    paquetePip: string,
+    enProgreso?: (mensaje: string) => void
+  ): Promise<{ exito: boolean; mensaje: string }> {
+    if (!this.esModoDesktop()) {
+      return { exito: true, mensaje: 'Modo web: simulación activa.' };
+    }
+
+    if (enProgreso) enProgreso(`Instalando ${paquetePip} en segundo plano con pip...`);
+
+    try {
+      const invoker = (typeof window !== 'undefined' && (window as any).__TAURI__?.invoke)
+        ? (window as any).__TAURI__.invoke
+        : invoke;
+      await invoker('instalar_dependencia', { paquete: paquetePip });
+      if (enProgreso) enProgreso(`Instalación de ${paquetePip} completada con éxito.`);
+      return { exito: true, mensaje: `${paquetePip} se ha instalado correctamente.` };
+    } catch (err: any) {
+      const msg = err?.message || String(err);
+      return { exito: false, mensaje: `Fallo al instalar ${paquetePip}: ${msg}` };
+    }
+  }
+}
+
+export interface InfoLibreriaPython {
+  id: string;
+  paquetePip: string;
+  module: string;
+  nombre: string;
+  desc: string;
+  rol: string;
+  obligatoria: boolean;
+  instalada: boolean;
+  version: string;
+}
+
+export interface ResumenLibreriasPython {
+  python_instalado: boolean;
+  python_version: string;
+  python_ruta: string;
+  todas_instaladas: boolean;
+  librerias: InfoLibreriaPython[];
 }
 

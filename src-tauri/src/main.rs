@@ -765,6 +765,77 @@ async fn instalar_dependencia(paquete: String) -> Result<String, String> {
 }
 
 #[tauri::command]
+async fn auditar_librerias_python() -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let info = resolver_entorno(false);
+        if !info.python_instalado || info.python_ruta.is_empty() {
+            let res = serde_json::json!({
+                "python_instalado": false,
+                "python_version": "",
+                "python_ruta": "",
+                "todas_instaladas": false,
+                "librerias": []
+            });
+            return Ok(res.to_string());
+        }
+
+        let script = r#"
+import json, sys
+libs = [
+  {"id": "openai-whisper", "paquetePip": "openai-whisper", "module": "whisper", "nombre": "OpenAI Whisper", "desc": "Motor base para la transcripción acústica de audio y video", "rol": "Transcripción ASR", "obligatoria": True},
+  {"id": "torch", "paquetePip": "torch", "module": "torch", "nombre": "PyTorch (Torch)", "desc": "Motor tensorial y aceleración para inferencia de redes neuronales", "rol": "Inferencia Neuronal", "obligatoria": True},
+  {"id": "torchaudio", "paquetePip": "torchaudio", "module": "torchaudio", "nombre": "TorchAudio", "desc": "Extracción espectral, banco de filtros Mel y coeficientes MFCC", "rol": "Procesamiento Acústico", "obligatoria": True},
+  {"id": "scipy", "paquetePip": "scipy", "module": "scipy", "nombre": "SciPy", "desc": "Análisis matemático de señales, distancias de coseno y clustering", "rol": "Diarización y Clustering", "obligatoria": True},
+  {"id": "scikit-learn", "paquetePip": "scikit-learn", "module": "sklearn", "nombre": "Scikit-Learn", "desc": "Algoritmos avanzados de agrupamiento espectral y separación de hablantes", "rol": "Diarización Pericial", "obligatoria": False},
+  {"id": "soundfile", "paquetePip": "soundfile", "module": "soundfile", "nombre": "SoundFile", "desc": "Decodificación precisa de audio multiformato y streaming PCM", "rol": "Decodificación de Audio", "obligatoria": False}
+]
+res = []
+for item in libs:
+    try:
+        mod = __import__(item["module"])
+        ver = getattr(mod, "__version__", "Instalada")
+        res.append({**item, "instalada": True, "version": str(ver)})
+    except Exception:
+        res.append({**item, "instalada": False, "version": "No instalada"})
+print(json.dumps(res))
+"#;
+
+        let mut cmd = obtener_comando_python();
+        cmd.args(&["-c", script]);
+        configurar_proceso_oculto(&mut cmd);
+
+        let output = cmd.output().map_err(|e| format!("Error comprobando librerías con Python: {}", e))?;
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+
+        let librerias: serde_json::Value = if let Ok(val) = serde_json::from_str(&stdout) {
+            val
+        } else {
+            serde_json::json!([])
+        };
+
+        let todas_obligatorias = librerias.as_array().map_or(false, |arr| {
+            arr.iter().all(|l| {
+                let obligatoria = l.get("obligatoria").and_then(|o| o.as_bool()).unwrap_or(false);
+                let instalada = l.get("instalada").and_then(|i| i.as_bool()).unwrap_or(false);
+                !obligatoria || instalada
+            })
+        });
+
+        let resultado = serde_json::json!({
+            "python_instalado": true,
+            "python_version": info.python_version,
+            "python_ruta": info.python_ruta,
+            "todas_instaladas": todas_obligatorias,
+            "librerias": librerias
+        });
+
+        Ok(resultado.to_string())
+    })
+    .await
+    .map_err(|e| format!("Error en tarea de auditoría de librerías: {}", e))?
+}
+
+#[tauri::command]
 async fn descargar_modelo(window: Window, modelo_id: String) -> Result<String, String> {
     let app = window.app_handle();
     let script_path = resolver_ruta_script(&app, "model_downloader.py");
@@ -1084,6 +1155,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             comprobar_sistema,
             auditar_modelos,
+            auditar_librerias_python,
             instalar_dependencia,
             descargar_modelo,
             guardar_archivo_texto,
