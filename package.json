@@ -1,6 +1,6 @@
 {
   "name": "sephent-transcriptor",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "description": "Desktop web app for audio/video transcription using OpenAI Whisper",
   "scripts": {
     "dev": "vite",

@@ -97,6 +97,19 @@ export interface TranscriptionReviewDossier {
   fechaRevision?: string;
   hashSha256?: string;
   hashGeneradoEn?: string;
+  mostrarRolEnNombre?: boolean;
+}
+
+export interface OpcionesInformePericial {
+  incluirMetadatos?: boolean;
+  incluirCadenaCustodiaHash?: boolean;
+  incluirCedulaHablantes?: boolean;
+  incluirNotasPericiales?: boolean;
+  incluirCuerpoTranscripcion?: boolean;
+  incluirCertificacionValidez?: boolean;
+  notasPericiales?: string;
+  nombreGrupo?: string;
+  peritoOperador?: string;
 }
 
 export interface MergingRulesConfig {

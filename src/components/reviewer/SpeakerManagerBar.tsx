@@ -1,7 +1,9 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { SpeakerProfile } from '../../services/reviewer/types';
 import { THEME_TOKENS } from '../../config/themeTokens';
 import { AudioSegmentPlayer } from './AudioSegmentPlayer';
+import { UserSettingsService } from '../../services/userSettingsService';
+import { TranscriptionReviewerService } from '../../services/reviewer/transcriptionReviewerService';
 
 export interface SpeakerSampleInfo {
   startTime: number;
@@ -17,19 +19,9 @@ interface SpeakerManagerBarProps {
   onRenombrarHablante: (speakerId: string, nuevoNombre: string) => void;
   onAsignarRol?: (speakerId: string, rol: string) => void;
   onAgregarHablante?: () => void;
+  mostrarRolEnNombre?: boolean;
+  onToggleMostrarRolEnNombre?: (mostrar: boolean) => void;
 }
-
-const ROLES_PREDEFINIDOS = [
-  'Juez / Autoridad',
-  'Fiscal / Ministerio Público',
-  'Defensor / Abogado',
-  'Perito / Especialista',
-  'Testigo',
-  'Víctima / Querellante',
-  'Imputado / Declarante',
-  'Secretario de Acuerdos',
-  'Interlocutor / Participante',
-];
 
 export const SpeakerManagerBar: React.FC<SpeakerManagerBarProps> = ({
   speakers,
@@ -39,8 +31,32 @@ export const SpeakerManagerBar: React.FC<SpeakerManagerBarProps> = ({
   onRenombrarHablante,
   onAsignarRol,
   onAgregarHablante,
+  mostrarRolEnNombre = false,
+  onToggleMostrarRolEnNombre,
 }) => {
   const listaHablantes = Object.values(speakers);
+  const [nuevoRolPersonalizado, setNuevoRolPersonalizado] = useState('');
+  const [rolesDisponibles, setRolesDisponibles] = useState<string[]>(() =>
+    UserSettingsService.obtenerRolesGlobales()
+  );
+  const [mensajeRol, setMensajeRol] = useState<string | null>(null);
+
+  const totalHablantes = listaHablantes.length;
+  const identificados = listaHablantes.filter((s) =>
+    TranscriptionReviewerService.estaHablanteIdentificado(s)
+  ).length;
+  const todosIdentificados = totalHablantes > 0 && identificados === totalHablantes;
+
+  const handleAgregarRolGlobal = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const rolLimpio = nuevoRolPersonalizado.trim();
+    if (!rolLimpio) return;
+    const actualizados = UserSettingsService.agregarRolPersonalizado(rolLimpio);
+    setRolesDisponibles(actualizados);
+    setNuevoRolPersonalizado('');
+    setMensajeRol(`✓ Rol "${rolLimpio}" añadido globalmente.`);
+    setTimeout(() => setMensajeRol(null), 3500);
+  };
 
   return (
     <div
@@ -100,6 +116,32 @@ export const SpeakerManagerBar: React.FC<SpeakerManagerBarProps> = ({
                 <span>Añadir Persona</span>
               </button>
             )}
+            <span
+              style={{
+                fontSize: '0.75rem',
+                fontWeight: 600,
+                padding: '0.2rem 0.65rem',
+                borderRadius: '12px',
+                backgroundColor: todosIdentificados ? '#E8EFE3' : '#FEF3C7',
+                color: todosIdentificados ? '#2A4A1C' : '#92400E',
+                border: `1px solid ${todosIdentificados ? '#C4DAB5' : '#FCD34D'}`,
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.35rem',
+              }}
+              title={
+                todosIdentificados
+                  ? 'Requisito pericial cumplido: todas las personas identificadas'
+                  : 'Requisito pericial pendiente: se deben identificar todas las personas asignándoles su nombre real'
+              }
+            >
+              <span>{todosIdentificados ? '✓' : '⚠️'}</span>
+              <span>
+                {todosIdentificados
+                  ? `Personas Identificadas (${identificados}/${totalHablantes})`
+                  : `Identificación: ${identificados}/${totalHablantes}`}
+              </span>
+            </span>
             <span
               style={{
                 fontSize: '0.75rem',
@@ -218,6 +260,94 @@ export const SpeakerManagerBar: React.FC<SpeakerManagerBarProps> = ({
         </div>
       </div>
 
+      {/* Barra de Opciones Globales de Roles y Personalización */}
+      <div
+        style={{
+          backgroundColor: '#ffffff',
+          border: `1px solid ${THEME_TOKENS.colors.borderSubtle}`,
+          borderRadius: THEME_TOKENS.radii.sm,
+          padding: '0.75rem 1rem',
+          marginBottom: '1rem',
+          display: 'flex',
+          flexWrap: 'wrap',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: '0.85rem',
+          boxShadow: THEME_TOKENS.shadows.xs,
+        }}
+      >
+        {/* Opción de mostrar rol entre paréntesis al lado del nombre */}
+        <label
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.5rem',
+            fontSize: '0.8125rem',
+            color: THEME_TOKENS.colors.textPrimary,
+            cursor: 'pointer',
+            fontWeight: 500,
+            userSelect: 'none',
+          }}
+          title="Si está activo, en la transcripción y subtítulos aparecerá: Nombre (Rol)"
+        >
+          <input
+            type="checkbox"
+            checked={mostrarRolEnNombre}
+            onChange={(e) => onToggleMostrarRolEnNombre?.(e.target.checked)}
+            style={{ cursor: 'pointer', accentColor: THEME_TOKENS.colors.accentNavy }}
+          />
+          <span>Mostrar rol entre paréntesis al lado del nombre (ej. <em>Pedro González (Fiscal)</em>)</span>
+        </label>
+
+        {/* Añadir nuevo rol personalizado global */}
+        <form
+          onSubmit={handleAgregarRolGlobal}
+          style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}
+        >
+          <input
+            type="text"
+            value={nuevoRolPersonalizado}
+            onChange={(e) => setNuevoRolPersonalizado(e.target.value)}
+            placeholder="Añadir rol personalizado global..."
+            style={{
+              padding: '0.35rem 0.6rem',
+              borderRadius: THEME_TOKENS.radii.xs,
+              border: `1px solid ${THEME_TOKENS.colors.borderSubtle}`,
+              fontSize: '0.78rem',
+              minWidth: '220px',
+              outline: 'none',
+              backgroundColor: THEME_TOKENS.colors.surfaceBase,
+            }}
+          />
+          <button
+            type="button"
+            onClick={() => handleAgregarRolGlobal()}
+            style={{
+              backgroundColor: THEME_TOKENS.colors.surfaceDark,
+              color: '#ffffff',
+              border: 'none',
+              padding: '0.35rem 0.75rem',
+              borderRadius: THEME_TOKENS.radii.xs,
+              fontSize: '0.75rem',
+              fontWeight: 600,
+              cursor: 'pointer',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.3rem',
+            }}
+            title="Añadir rol personalizado a la lista global para reutilizarlo en cualquier audio"
+          >
+            <span>+</span>
+            <span>Añadir Rol</span>
+          </button>
+          {mensajeRol && (
+            <span style={{ fontSize: '0.725rem', color: '#2A4A1C', fontWeight: 600 }}>
+              {mensajeRol}
+            </span>
+          )}
+        </form>
+      </div>
+
       {/* Grid de Tarjetas Didácticas por Hablante */}
       <div
         style={{
@@ -275,9 +405,41 @@ export const SpeakerManagerBar: React.FC<SpeakerManagerBarProps> = ({
                     >
                       ID Técnico: {spk.speakerId}
                     </span>
-                    <strong style={{ fontSize: '0.875rem', color: spk.color }}>
-                      {spk.displayName}
-                    </strong>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
+                      <strong style={{ fontSize: '0.875rem', color: spk.color }}>
+                        {spk.displayName}
+                      </strong>
+                      {TranscriptionReviewerService.estaHablanteIdentificado(spk) ? (
+                        <span
+                          style={{
+                            fontSize: '0.65rem',
+                            backgroundColor: '#E8EFE3',
+                            color: '#2A4A1C',
+                            border: '1px solid #C4DAB5',
+                            padding: '0.05rem 0.35rem',
+                            borderRadius: '6px',
+                            fontWeight: 600,
+                          }}
+                        >
+                          ✓ Identificado
+                        </span>
+                      ) : (
+                        <span
+                          style={{
+                            fontSize: '0.65rem',
+                            backgroundColor: '#FEF3C7',
+                            color: '#92400E',
+                            border: '1px solid #FCD34D',
+                            padding: '0.05rem 0.35rem',
+                            borderRadius: '6px',
+                            fontWeight: 600,
+                          }}
+                          title="Requisito pericial: asigne el nombre real de esta persona"
+                        >
+                          ⚠️ Asignar nombre
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </div>
 
@@ -434,8 +596,8 @@ export const SpeakerManagerBar: React.FC<SpeakerManagerBarProps> = ({
                     }}
                     title="Seleccionar sugerencia de rol predefinido"
                   >
-                    <option value="">Sugerencias...</option>
-                    {ROLES_PREDEFINIDOS.map((r) => (
+                    <option value="">Roles guardados...</option>
+                    {rolesDisponibles.map((r) => (
                       <option key={r} value={r}>
                         {r}
                       </option>

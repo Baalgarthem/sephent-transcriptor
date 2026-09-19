@@ -13,6 +13,7 @@ import {
   ReviewedSegmentBlock,
   TranscriptionReviewDossier,
   MergingRulesConfig,
+  OpcionesInformePericial,
 } from './types';
 import { SpeakerRegistry } from './speakers/speakerRegistry';
 import { SegmentMergerEngine } from './reconstruction/segmentMergerEngine';
@@ -159,6 +160,70 @@ export class TranscriptionReviewerService {
     const dossierActualizado: TranscriptionReviewDossier = {
       ...dossier,
       speakers: registry.obtenerMapa(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    ReviewerDatabase.guardar(dossierActualizado);
+    return dossierActualizado;
+  }
+
+  /**
+   * Determina si una persona ha sido formalmente identificada por el usuario
+   * (cuenta con un nombre propio asignado y no es un marcador genérico por defecto).
+   */
+  public static estaHablanteIdentificado(speaker?: { displayName?: string; speakerId?: string }): boolean {
+    if (!speaker || !speaker.displayName) return false;
+    const nombre = speaker.displayName.trim();
+    if (!nombre) return false;
+    // Marcadores genéricos por defecto: "Persona 1", "Persona 02", "speaker_01", "Hablante 1"
+    const esGenerico = /^(persona|speaker|hablante|interlocutor)\s*[_#\-]?\s*\d+$/i.test(nombre);
+    return !esGenerico;
+  }
+
+  /**
+   * Valida si todas las personas detectadas en el audio/video han sido identificadas con un nombre real.
+   * Este es el REQUISITO MÍNIMO de validez pericial para expedir el informe oficial.
+   */
+  public static validarPersonasIdentificadas(dossier: TranscriptionReviewDossier): {
+    todasIdentificadas: boolean;
+    total: number;
+    identificadas: number;
+    pendientes: string[];
+  } {
+    const speakers = Object.values(dossier.speakers || {});
+    if (speakers.length === 0) {
+      return { todasIdentificadas: false, total: 0, identificadas: 0, pendientes: ['Sin interlocutores registrados'] };
+    }
+
+    const pendientes: string[] = [];
+    let identificadas = 0;
+
+    for (const spk of speakers) {
+      if (this.estaHablanteIdentificado(spk)) {
+        identificadas++;
+      } else {
+        pendientes.push(spk.displayName || spk.speakerId);
+      }
+    }
+
+    return {
+      todasIdentificadas: pendientes.length === 0,
+      total: speakers.length,
+      identificadas,
+      pendientes,
+    };
+  }
+
+  /**
+   * Actualiza la preferencia de mostrar el rol entre paréntesis al lado del nombre
+   */
+  public static cambiarPreferenciaMostrarRol(
+    dossier: TranscriptionReviewDossier,
+    mostrarRol: boolean
+  ): TranscriptionReviewDossier {
+    const dossierActualizado: TranscriptionReviewDossier = {
+      ...dossier,
+      mostrarRolEnNombre: mostrarRol,
       updatedAt: new Date().toISOString(),
     };
 
@@ -392,7 +457,11 @@ export class TranscriptionReviewerService {
   /**
    * Genera el contenido canónico de texto literal (.txt) a partir de los bloques revisados.
    */
-  public static generarTxtDesdeBloques(dossier: TranscriptionReviewDossier): string {
+  public static generarTxtDesdeBloques(
+    dossier: TranscriptionReviewDossier,
+    opciones?: { mostrarRol?: boolean }
+  ): string {
+    const mostrarRol = opciones?.mostrarRol ?? dossier.mostrarRolEnNombre ?? false;
     const lineas: string[] = [];
     lineas.push('================================================================================');
     lineas.push('                   TRANSCRIPCIÓN DE AUDIO/VIDEO — SEPHENT TRANSCRIPTOR');
@@ -412,7 +481,7 @@ export class TranscriptionReviewerService {
       const tInicio = this.formatearSegundos(b.startTime);
       const tFin = this.formatearSegundos(b.endTime);
       const rol = dossier.speakers[b.speakerId]?.role;
-      const etiqueta = rol && !b.speakerName.toLowerCase().includes(rol.toLowerCase())
+      const etiqueta = (mostrarRol && rol && !b.speakerName.toLowerCase().includes(rol.toLowerCase()))
         ? `${b.speakerName} (${rol})`
         : b.speakerName;
       lineas.push(`[${tInicio} - ${tFin}] ${etiqueta}:`);
@@ -425,14 +494,18 @@ export class TranscriptionReviewerService {
   /**
    * Genera el formato de subtítulos temporizados (.srt) a partir de los bloques revisados.
    */
-  public static generarSrtDesdeBloques(dossier: TranscriptionReviewDossier): string {
+  public static generarSrtDesdeBloques(
+    dossier: TranscriptionReviewDossier,
+    opciones?: { mostrarRol?: boolean }
+  ): string {
+    const mostrarRol = opciones?.mostrarRol ?? dossier.mostrarRolEnNombre ?? false;
     const bloquesSrt: string[] = [];
 
     dossier.reviewedBlocks.forEach((b, index) => {
       const startSrt = this.formatearSegundosSRT(b.startTime);
       const endSrt = this.formatearSegundosSRT(b.endTime);
       const rol = dossier.speakers[b.speakerId]?.role;
-      const etiqueta = rol && !b.speakerName.toLowerCase().includes(rol.toLowerCase())
+      const etiqueta = (mostrarRol && rol && !b.speakerName.toLowerCase().includes(rol.toLowerCase()))
         ? `${b.speakerName} (${rol})`
         : b.speakerName;
 
@@ -572,17 +645,28 @@ export class TranscriptionReviewerService {
    */
   public static generarInformeOficialTranscripcion(
     dossier: TranscriptionReviewDossier,
-    opciones?: {
-      notasPericiales?: string;
-      nombreGrupo?: string;
-      peritoOperador?: string;
-    }
+    opciones?: OpcionesInformePericial
   ): string {
     if (!dossier.revisado) {
       throw new Error(
         'Bloqueo de seguridad: No se puede realizar el informe de transcripción sin antes haber marcado la transcripción como revisada desde la sección de Revisar y Validar Hablantes.'
       );
     }
+
+    // REQUISITO MÍNIMO ESTRICTO: Todas las personas en el audio/video deben estar identificadas
+    const validacion = this.validarPersonasIdentificadas(dossier);
+    if (!validacion.todasIdentificadas) {
+      throw new Error(
+        `Requisito mínimo pericial no cumplido: Debe identificar a todas las personas en el audio o video asignándoles su nombre real antes de generar el informe pericial. Pendientes: ${validacion.pendientes.join(', ')}.`
+      );
+    }
+
+    const incMetadatos = opciones?.incluirMetadatos !== false;
+    const incHash = opciones?.incluirCadenaCustodiaHash !== false;
+    const incCedula = opciones?.incluirCedulaHablantes !== false;
+    const incNotas = opciones?.incluirNotasPericiales !== false;
+    const incCuerpo = opciones?.incluirCuerpoTranscripcion !== false;
+    const incCert = opciones?.incluirCertificacionValidez !== false;
 
     const fechaInforme = new Date().toLocaleString('es-ES', {
       dateStyle: 'full',
@@ -598,57 +682,77 @@ export class TranscriptionReviewerService {
     lineas.push('                 INFORME OFICIAL DE TRANSCRIPCIÓN Y ACTA PERICIAL');
     lineas.push('================================================================================\n');
 
-    lineas.push('--- 1. INFORMACIÓN DEL EXPEDIENTE Y ARCHIVO ---');
-    lineas.push(`Folio de Revisión:      ${dossier.id}`);
-    lineas.push(`Documento de Origen:    ${dossier.sourceFileName}`);
-    if (opciones?.nombreGrupo) {
-      lineas.push(`Expediente / Caso:      ${opciones.nombreGrupo}`);
-    }
-    lineas.push(`Modelo Whisper:         ${dossier.modelUsed}`);
-    lineas.push(`Idioma Detectado:       ${dossier.language}`);
-    lineas.push(`Fecha de Emisión:       ${fechaInforme}`);
-    if (dossier.fechaRevision) {
-      lineas.push(`Fecha de Validación:    ${new Date(dossier.fechaRevision).toLocaleString('es-ES')}`);
-    }
-    lineas.push(`Estado de Validación:   CERTIFICADO Y REVISADO [✓ APROBADO]\n`);
+    let seccionNum = 1;
 
-    lineas.push('--- 2. CADENA DE CUSTODIA E INTEGRIDAD FORENSE (HASH SHA-256) ---');
-    lineas.push(`Algoritmo Criptográfico: SHA-256 (FIPS 180-4)`);
-    lineas.push(`Firma Digital (Hash):    ${hashCertificado}`);
-    lineas.push(`Sello Temporal de Hash:  ${fechaCertificado}`);
-    lineas.push(`Garantía de Integridad:  Este hash certifica de forma unívoca e inalterable el contenido textual,`);
-    lineas.push(`                         los sellos de tiempo y la asignación de personas hablantes.\n`);
-
-    lineas.push('--- 3. CÉDULA DE PERSONAS HABLANTES IDENTIFICADAS ---');
-    lineas.push('| ID Técnico | Persona / Nombre Asignado | Rol Procesal | Intervenciones |');
-    lineas.push('|:-----------|:--------------------------|:-------------|:---------------|');
-    for (const spk of Object.values(dossier.speakers)) {
-      const intervenciones = dossier.reviewedBlocks.filter((b) => b.speakerId === spk.speakerId).length;
-      lineas.push(
-        `| ${spk.speakerId.padEnd(10)} | ${spk.displayName.padEnd(25)} | ${(spk.role || 'No especificado').padEnd(12)} | ${String(intervenciones).padStart(14)} |`
-      );
+    if (incMetadatos) {
+      lineas.push(`--- ${seccionNum++}. INFORMACIÓN DEL EXPEDIENTE Y ARCHIVO ---`);
+      lineas.push(`Folio de Revisión:      ${dossier.id}`);
+      lineas.push(`Documento de Origen:    ${dossier.sourceFileName}`);
+      if (opciones?.nombreGrupo) {
+        lineas.push(`Expediente / Caso:      ${opciones.nombreGrupo}`);
+      }
+      if (opciones?.peritoOperador) {
+        lineas.push(`Perito / Operador:      ${opciones.peritoOperador}`);
+      }
+      lineas.push(`Modelo Whisper:         ${dossier.modelUsed}`);
+      lineas.push(`Idioma Detectado:       ${dossier.language}`);
+      lineas.push(`Fecha de Emisión:       ${fechaInforme}`);
+      if (dossier.fechaRevision) {
+        lineas.push(`Fecha de Validación:    ${new Date(dossier.fechaRevision).toLocaleString('es-ES')}`);
+      }
+      lineas.push(`Estado de Validación:   CERTIFICADO Y REVISADO [✓ APROBADO]\n`);
     }
-    lineas.push('');
 
-    if (opciones?.notasPericiales || dossier.originalTranscriptionId) {
-      lineas.push('--- 4. CUADERNO DE NOTAS Y OBSERVACIONES PERICIALES ---');
+    if (incHash) {
+      lineas.push(`--- ${seccionNum++}. CADENA DE CUSTODIA E INTEGRIDAD FORENSE (HASH SHA-256) ---`);
+      lineas.push(`Algoritmo Criptográfico: SHA-256 (FIPS 180-4)`);
+      lineas.push(`Firma Digital (Hash):    ${hashCertificado}`);
+      lineas.push(`Sello Temporal de Hash:  ${fechaCertificado}`);
+      lineas.push(`Garantía de Integridad:  Este hash certifica de forma unívoca e inalterable el contenido textual,`);
+      lineas.push(`                         los sellos de tiempo y la asignación de personas hablantes.\n`);
+    }
+
+    if (incCedula) {
+      lineas.push(`--- ${seccionNum++}. CÉDULA DE PERSONAS HABLANTES IDENTIFICADAS ---`);
+      lineas.push('| ID Técnico | Persona / Nombre Asignado | Rol Procesal | Intervenciones |');
+      lineas.push('|:-----------|:--------------------------|:-------------|:---------------|');
+      for (const spk of Object.values(dossier.speakers)) {
+        const intervenciones = dossier.reviewedBlocks.filter((b) => b.speakerId === spk.speakerId).length;
+        lineas.push(
+          `| ${spk.speakerId.padEnd(10)} | ${spk.displayName.padEnd(25)} | ${(spk.role || 'No especificado').padEnd(12)} | ${String(intervenciones).padStart(14)} |`
+        );
+      }
+      lineas.push('');
+    }
+
+    if (incNotas && (opciones?.notasPericiales || dossier.originalTranscriptionId)) {
+      lineas.push(`--- ${seccionNum++}. CUADERNO DE NOTAS Y OBSERVACIONES PERICIALES ---`);
       lineas.push(opciones?.notasPericiales ? opciones.notasPericiales.trim() : 'Sin observaciones adicionales registradas.');
       lineas.push('\n');
     }
 
-    lineas.push('--- 5. CUERPO DE LA TRANSCRIPCIÓN ÍNTEGRA Y DEPURADA ---');
-    dossier.reviewedBlocks.forEach((bloque, idx) => {
-      const tiempoInicio = this.formatearSegundos(bloque.startTime);
-      const tiempoFin = this.formatearSegundos(bloque.endTime);
-      lineas.push(`[${idx + 1}] [${tiempoInicio} - ${tiempoFin}] ${bloque.speakerName}:`);
-      lineas.push(`    "${bloque.reviewedText}"\n`);
-    });
+    if (incCuerpo) {
+      const mostrarRol = dossier.mostrarRolEnNombre ?? false;
+      lineas.push(`--- ${seccionNum++}. CUERPO DE LA TRANSCRIPCIÓN ÍNTEGRA Y DEPURADA ---`);
+      dossier.reviewedBlocks.forEach((bloque, idx) => {
+        const tiempoInicio = this.formatearSegundos(bloque.startTime);
+        const tiempoFin = this.formatearSegundos(bloque.endTime);
+        const rol = dossier.speakers[bloque.speakerId]?.role;
+        const etiqueta = (mostrarRol && rol && !bloque.speakerName.toLowerCase().includes(rol.toLowerCase()))
+          ? `${bloque.speakerName} (${rol})`
+          : bloque.speakerName;
+        lineas.push(`[${idx + 1}] [${tiempoInicio} - ${tiempoFin}] ${etiqueta}:`);
+        lineas.push(`    "${bloque.reviewedText}"\n`);
+      });
+    }
 
-    lineas.push('================================================================================');
-    lineas.push('                     CERTIFICACIÓN DE VALIDEZ PERICIAL');
-    lineas.push('  Se hace constar que la presente transcripción ha sido revisada, cotejada acústicamente');
-    lineas.push('  y validada formalmente, conservando correspondencia fiel con el archivo original.');
-    lineas.push('================================================================================');
+    if (incCert) {
+      lineas.push('================================================================================');
+      lineas.push('                     CERTIFICACIÓN DE VALIDEZ PERICIAL');
+      lineas.push('  Se hace constar que la presente transcripción ha sido revisada, cotejada acústicamente');
+      lineas.push('  y validada formalmente, conservando correspondencia fiel con el archivo original.');
+      lineas.push('================================================================================');
+    }
 
     return lineas.join('\n');
   }

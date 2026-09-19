@@ -165,6 +165,16 @@ export default function TranscriptionPanel(): React.ReactElement {
       dossier.hashGeneradoEn = itemBD.hashGeneradoEn;
     }
 
+    // REQUISITO MÍNIMO PERICIAL: Todas las personas deben estar identificadas
+    const validacion = TranscriptionReviewerService.validarPersonasIdentificadas(dossier);
+    if (!validacion.todasIdentificadas) {
+      alert(
+        `🔒 Requisito pericial mínimo no cumplido: Debe identificar a todas las personas en el audio o video asignándoles su nombre real antes de generar el informe pericial.\n\nPendientes de identificar: ${validacion.pendientes.join(', ')}.\n\nSe abrirá el panel para que puedas asignarles su nombre.`
+      );
+      handleAbrirRevisor(nombreArchivo, trxId);
+      return;
+    }
+
     try {
       const informe = TranscriptionReviewerService.generarInformeOficialTranscripcion(dossier, {
         notasPericiales: itemBD.notes,

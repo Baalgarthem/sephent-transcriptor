@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import {
   TranscriptionReviewDossier,
   RawTranscriptSegment,
+  OpcionesInformePericial,
 } from '../../services/reviewer/types';
 import { TranscriptionReviewerService } from '../../services/reviewer/transcriptionReviewerService';
 import { ReviewerDatabase } from '../../services/reviewer/storage/reviewerDatabase';
@@ -67,6 +68,17 @@ export const ReviewerWorkspaceModal: React.FC<ReviewerWorkspaceModalProps> = ({
   const [mostrarSeccionNotas, setMostrarSeccionNotas] = useState(false);
   const [calculandoHash, setCalculandoHash] = useState(false);
   const [audioUrlActivo, setAudioUrlActivo] = useState<string | undefined>(audioUrl);
+
+  // Estados para modal de personalización del informe pericial
+  const [modalConfigInformeAbierto, setModalConfigInformeAbierto] = useState(false);
+  const [opcionesInforme, setOpcionesInforme] = useState<OpcionesInformePericial>({
+    incluirMetadatos: true,
+    incluirCadenaCustodiaHash: true,
+    incluirCedulaHablantes: true,
+    incluirNotasPericiales: true,
+    incluirCuerpoTranscripcion: true,
+    incluirCertificacionValidez: true,
+  });
 
   // Lista de transcripciones en base de datos
   const [transcripcionesBD, setTranscripcionesBD] = useState<StoredTranscription[]>([]);
@@ -293,33 +305,125 @@ export const ReviewerWorkspaceModal: React.FC<ReviewerWorkspaceModalProps> = ({
     mostrarMensaje(`Expediente cargado: ${nuevoNombre}`);
   };
 
-  // Renombrar hablante
-  const handleRenombrarHablante = (speakerId: string, nuevoNombre: string) => {
+  // Persiste en caliente en la base de datos y archivos, y recalcula el Hash SHA-256 automáticamente
+  const persistirYHashearEnCaliente = async (dossierBase: TranscriptionReviewDossier) => {
+    // 1. Recalcular automáticamente el Hash SHA-256 para esta versión exacta
+    const nuevoHash = await TranscriptionReviewerService.generarHashIntegridad(dossierBase);
+    const ahora = new Date().toISOString();
+    const dossierActualizado: TranscriptionReviewDossier = {
+      ...dossierBase,
+      hashSha256: nuevoHash,
+      hashGeneradoEn: ahora,
+      updatedAt: ahora,
+    };
+
+    setDossier(dossierActualizado);
+    ReviewerDatabase.guardar(dossierActualizado);
+
+    // 2. Sincronizar contenidos (.txt y .srt) con nombres, roles y visualización actualizada
+    const mapaHablantes: Record<string, string> = {};
+    const mapaRoles: Record<string, string> = {};
+    Object.values(dossierActualizado.speakers).forEach((s) => {
+      mapaHablantes[s.speakerId] = s.displayName;
+      if (s.role) mapaRoles[s.speakerId] = s.role;
+    });
+
+    const nuevoTxt = TranscriptionReviewerService.generarTxtDesdeBloques(dossierActualizado);
+    const nuevoSrt = TranscriptionReviewerService.generarSrtDesdeBloques(dossierActualizado);
+
+    const nuevosRawSegments = dossierActualizado.reviewedBlocks.map((b, idx) => ({
+      id: b.id || `seg_${idx + 1}`,
+      speakerId: b.speakerId,
+      startTime: b.startTime,
+      endTime: b.endTime,
+      text: b.reviewedText,
+      confidence: 1.0,
+    }));
+
+    if (idSeleccionado) {
+      TranscriptionDatabase.actualizarContenidoCompleto(idSeleccionado, {
+        textContent: nuevoTxt,
+        srtContent: nuevoSrt,
+        speakerNames: mapaHablantes,
+        speakerRoles: mapaRoles,
+        speakers: dossierActualizado.speakers,
+        rawSegments: nuevosRawSegments,
+        hashSha256: nuevoHash,
+        hashGeneradoEn: ahora,
+      });
+
+      // 3. Sobrescribir archivos en disco si existen salidas configuradas
+      const regActual = TranscriptionDatabase.buscarPorId(idSeleccionado);
+      if (regActual?.outputs && regActual.outputs.length > 0) {
+        const tauri = typeof window !== 'undefined' ? (window as any).__TAURI__ : null;
+        for (const out of regActual.outputs) {
+          if (!out.fullPath || out.fullPath.startsWith('[')) continue;
+          let contenidoAEscribir = '';
+          if (out.format === 'txt') contenidoAEscribir = nuevoTxt;
+          else if (out.format === 'srt') contenidoAEscribir = nuevoSrt;
+
+          if (contenidoAEscribir && tauri?.invoke) {
+            try {
+              await tauri.invoke('guardar_archivo_texto', {
+                ruta: out.fullPath,
+                contenido: contenidoAEscribir,
+              });
+            } catch (err: any) {
+              console.warn(`No se pudo sobrescribir archivo en disco (${out.fullPath}):`, err);
+            }
+          }
+        }
+      }
+
+      recargarDatosBase();
+    }
+
+    if (alGuardarHablantes) {
+      alGuardarHablantes({
+        speakerNames: mapaHablantes,
+        transcriptionId: idSeleccionado,
+        textContent: nuevoTxt,
+        srtContent: nuevoSrt,
+        rawSegments: nuevosRawSegments,
+      });
+    }
+
+    setHayCambiosSinGuardar(false);
+  };
+
+  // Renombrar hablante con sincronización y hash automático
+  const handleRenombrarHablante = async (speakerId: string, nuevoNombre: string) => {
     const actualizado = TranscriptionReviewerService.renombrarHablanteEnDossier(
       dossier,
       speakerId,
       nuevoNombre
     );
-    setDossier(actualizado);
-    setHayCambiosSinGuardar(true);
+    await persistirYHashearEnCaliente(actualizado);
   };
 
-  // Asignar rol procesal
-  const handleAsignarRolHablante = (speakerId: string, rol: string) => {
+  // Asignar rol procesal con sincronización y hash automático
+  const handleAsignarRolHablante = async (speakerId: string, rol: string) => {
     const actualizado = TranscriptionReviewerService.asignarRolHablante(
       dossier,
       speakerId,
       rol
     );
-    setDossier(actualizado);
-    setHayCambiosSinGuardar(true);
+    await persistirYHashearEnCaliente(actualizado);
+  };
+
+  // Alternar visualización de rol entre paréntesis junto al nombre
+  const handleToggleMostrarRolEnNombre = async (mostrar: boolean) => {
+    const actualizado = TranscriptionReviewerService.cambiarPreferenciaMostrarRol(
+      dossier,
+      mostrar
+    );
+    await persistirYHashearEnCaliente(actualizado);
   };
 
   // Agregar una nueva persona/hablante a la transcripción
-  const handleAgregarHablante = () => {
+  const handleAgregarHablante = async () => {
     const actualizado = TranscriptionReviewerService.agregarHablante(dossier);
-    setDossier(actualizado);
-    setHayCambiosSinGuardar(true);
+    await persistirYHashearEnCaliente(actualizado);
     mostrarMensaje('Nueva persona agregada a la transcripción. Asigna su nombre y rol.', 'info');
   };
 
@@ -585,26 +689,44 @@ export const ReviewerWorkspaceModal: React.FC<ReviewerWorkspaceModalProps> = ({
     }
   };
 
-  // Generar y descargar el Informe Oficial de Transcripción
+  // Abrir modal de personalización o descargar el Informe Oficial de Transcripción
   const handleGenerarInforme = () => {
     if (!dossier) return;
 
-    // REGLA ESTRICTA: No se puede generar informe sin antes haber marcado la transcripción como revisada
+    // REGLA ESTRICTA 1: No se puede generar informe sin antes haber marcado la transcripción como revisada
     if (!dossier.revisado) {
       mostrarMensaje(
-        '🔒 Bloqueo de seguridad: No se puede generar el informe de transcripción sin antes haber marcado la transcripción como revisada.',
+        '🔒 Bloqueo de seguridad: No se puede generar el informe de transcripción sin antes haber marcado la transcripción como revisada en el Paso 3.',
         'info'
       );
       return;
     }
 
+    // REQUISITO MÍNIMO PERICIAL 2: Identificar a todas las personas presentes en el audio/video
+    const validacion = TranscriptionReviewerService.validarPersonasIdentificadas(dossier);
+    if (!validacion.todasIdentificadas) {
+      mostrarMensaje(
+        `🔒 Requisito pericial mínimo no cumplido: Debe identificar a todas las personas en el audio o video asignándoles su nombre real antes de generar el informe pericial. Pendientes: ${validacion.pendientes.join(', ')}.`,
+        'info'
+      );
+      return;
+    }
+
+    setModalConfigInformeAbierto(true);
+  };
+
+  const handleDescargarInformeConOpciones = () => {
+    if (!dossier) return;
+
     try {
       const informe = TranscriptionReviewerService.generarInformeOficialTranscripcion(dossier, {
+        ...opcionesInforme,
         notasPericiales: notasTranscripcion,
         nombreGrupo: grupoActual?.nombre,
       });
       const base = (nombreArchivoActual || dossier.sourceFileName).replace(/\.[^/.]+$/, '');
       descargarArchivo(informe, `${base}_informe_oficial_transcripcion.txt`, 'text/plain;charset=utf-8');
+      setModalConfigInformeAbierto(false);
       mostrarMensaje('📑 ¡Informe Oficial de Transcripción generado y descargado con éxito!', 'exito');
     } catch (err: any) {
       mostrarMensaje(err?.message || 'Error al generar informe oficial', 'info');
@@ -999,35 +1121,50 @@ export const ReviewerWorkspaceModal: React.FC<ReviewerWorkspaceModalProps> = ({
 
           {/* Paso 4: Botón de Informe Oficial de Transcripción Condicionado */}
           <div>
-            <HoverTooltip
-              text={
-                dossier.revisado
-                  ? 'Descargar el Dictamen e Informe Oficial Pericial certificado con cadena de custodia'
-                  : '🔒 Bloqueado: No se puede generar el informe sin antes haber marcado la transcripción como revisada en el Paso 3.'
+            {(() => {
+              const valPersonas = TranscriptionReviewerService.validarPersonasIdentificadas(dossier);
+              const puedeDescargar = dossier.revisado && valPersonas.todasIdentificadas;
+
+              let tooltipText = 'Configurar y descargar el Dictamen e Informe Oficial Pericial';
+              if (!dossier.revisado) {
+                tooltipText = '🔒 Bloqueado: No se puede generar el informe sin antes haber marcado la transcripción como revisada en el Paso 3.';
+              } else if (!valPersonas.todasIdentificadas) {
+                tooltipText = `🔒 Requisito pericial mínimo pendiente: Identifique a todas las personas asignándoles su nombre real. Pendientes: ${valPersonas.pendientes.join(', ')}`;
               }
-            >
-              <button
-                onClick={handleGenerarInforme}
-                style={{
-                  backgroundColor: dossier.revisado ? '#1E4620' : '#D1D5DB',
-                  color: dossier.revisado ? '#ffffff' : '#4B5563',
-                  border: 'none',
-                  padding: '0.45rem 1.15rem',
-                  borderRadius: THEME_TOKENS.radii.xs,
-                  fontSize: '0.8125rem',
-                  fontWeight: 700,
-                  cursor: dossier.revisado ? 'pointer' : 'not-allowed',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '0.45rem',
-                  boxShadow: dossier.revisado ? THEME_TOKENS.shadows.sm : 'none',
-                  transition: 'all 0.15s ease',
-                }}
-              >
-                <span>{dossier.revisado ? '📑' : '🔒'}</span>
-                <span>{dossier.revisado ? 'Descargar Informe de Transcripción' : 'Informe Bloqueado (Sin revisar)'}</span>
-              </button>
-            </HoverTooltip>
+
+              let botonTexto = 'Descargar Informe de Transcripción';
+              if (!dossier.revisado) {
+                botonTexto = 'Informe Bloqueado (Sin revisar)';
+              } else if (!valPersonas.todasIdentificadas) {
+                botonTexto = `Informe Bloqueado (${valPersonas.identificadas}/${valPersonas.total} personas)`;
+              }
+
+              return (
+                <HoverTooltip text={tooltipText}>
+                  <button
+                    onClick={handleGenerarInforme}
+                    style={{
+                      backgroundColor: puedeDescargar ? '#1E4620' : '#D1D5DB',
+                      color: puedeDescargar ? '#ffffff' : '#4B5563',
+                      border: 'none',
+                      padding: '0.45rem 1.15rem',
+                      borderRadius: THEME_TOKENS.radii.xs,
+                      fontSize: '0.8125rem',
+                      fontWeight: 700,
+                      cursor: puedeDescargar ? 'pointer' : 'not-allowed',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.45rem',
+                      boxShadow: puedeDescargar ? THEME_TOKENS.shadows.sm : 'none',
+                      transition: 'all 0.15s ease',
+                    }}
+                  >
+                    <span>{puedeDescargar ? '📑' : '🔒'}</span>
+                    <span>{botonTexto}</span>
+                  </button>
+                </HoverTooltip>
+              );
+            })()}
           </div>
         </div>
 
@@ -1263,6 +1400,8 @@ export const ReviewerWorkspaceModal: React.FC<ReviewerWorkspaceModalProps> = ({
               onRenombrarHablante={handleRenombrarHablante}
               onAsignarRol={handleAsignarRolHablante}
               onAgregarHablante={handleAgregarHablante}
+              mostrarRolEnNombre={dossier.mostrarRolEnNombre || false}
+              onToggleMostrarRolEnNombre={handleToggleMostrarRolEnNombre}
             />
 
             {/* Barra de Filtro y Búsqueda en los Diálogos */}
@@ -1451,6 +1590,317 @@ export const ReviewerWorkspaceModal: React.FC<ReviewerWorkspaceModalProps> = ({
           }}
           alGuardar={handleGuardarGrupo}
         />
+
+        {/* Modal de Personalización de Opciones del Informe Pericial */}
+        {modalConfigInformeAbierto && (
+          <div
+            style={{
+              position: 'fixed',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              backgroundColor: 'rgba(0, 0, 0, 0.75)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              zIndex: 10000,
+              padding: '1rem',
+            }}
+          >
+            <div
+              style={{
+                backgroundColor: THEME_TOKENS.colors.surfaceBase,
+                border: `1px solid ${THEME_TOKENS.colors.borderDark}`,
+                borderRadius: THEME_TOKENS.radii.sm,
+                width: '100%',
+                maxWidth: '620px',
+                padding: '1.5rem',
+                boxShadow: THEME_TOKENS.shadows.lg,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '1.25rem',
+              }}
+            >
+              {/* Encabezado */}
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  borderBottom: `1px solid ${THEME_TOKENS.colors.borderSubtle}`,
+                  paddingBottom: '0.75rem',
+                }}
+              >
+                <div>
+                  <h3
+                    style={{
+                      margin: 0,
+                      fontSize: '1.1rem',
+                      color: THEME_TOKENS.colors.textPrimary,
+                      fontFamily: THEME_TOKENS.fonts.serif,
+                    }}
+                  >
+                    📑 Personalizar Informe Oficial de Transcripción
+                  </h3>
+                  <span style={{ fontSize: '0.75rem', color: THEME_TOKENS.colors.textSecondary }}>
+                    Selecciona libremente qué bloques y metadatos periciales deseas incluir
+                  </span>
+                </div>
+                <button
+                  onClick={() => setModalConfigInformeAbierto(false)}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    fontSize: '1.2rem',
+                    cursor: 'pointer',
+                    color: THEME_TOKENS.colors.textSecondary,
+                  }}
+                >
+                  ✕
+                </button>
+              </div>
+
+              {/* Lista de Checkboxes didácticos */}
+              <div
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '0.75rem',
+                  maxHeight: '55vh',
+                  overflowY: 'auto',
+                }}
+              >
+                <label
+                  style={{
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: '0.65rem',
+                    cursor: 'pointer',
+                    padding: '0.5rem 0.65rem',
+                    borderRadius: THEME_TOKENS.radii.xs,
+                    backgroundColor: '#ffffff',
+                    border: `1px solid ${THEME_TOKENS.colors.borderSubtle}`,
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={opcionesInforme.incluirMetadatos ?? true}
+                    onChange={(e) =>
+                      setOpcionesInforme({ ...opcionesInforme, incluirMetadatos: e.target.checked })
+                    }
+                    style={{ marginTop: '0.2rem', accentColor: THEME_TOKENS.colors.accentNavy }}
+                  />
+                  <div>
+                    <strong style={{ fontSize: '0.825rem', display: 'block', color: THEME_TOKENS.colors.textPrimary }}>
+                      1. Información del Expediente y Archivo Fuente
+                    </strong>
+                    <span style={{ fontSize: '0.725rem', color: THEME_TOKENS.colors.textSecondary }}>
+                      Folio, nombre de archivo, modelo Whisper, idioma detectado, fecha y estado de validación.
+                    </span>
+                  </div>
+                </label>
+
+                <label
+                  style={{
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: '0.65rem',
+                    cursor: 'pointer',
+                    padding: '0.5rem 0.65rem',
+                    borderRadius: THEME_TOKENS.radii.xs,
+                    backgroundColor: '#ffffff',
+                    border: `1px solid ${THEME_TOKENS.colors.borderSubtle}`,
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={opcionesInforme.incluirCadenaCustodiaHash ?? true}
+                    onChange={(e) =>
+                      setOpcionesInforme({ ...opcionesInforme, incluirCadenaCustodiaHash: e.target.checked })
+                    }
+                    style={{ marginTop: '0.2rem', accentColor: THEME_TOKENS.colors.accentNavy }}
+                  />
+                  <div>
+                    <strong style={{ fontSize: '0.825rem', display: 'block', color: THEME_TOKENS.colors.textPrimary }}>
+                      2. Cadena de Custodia e Integridad Forense (Hash SHA-256)
+                    </strong>
+                    <span style={{ fontSize: '0.725rem', color: THEME_TOKENS.colors.textSecondary }}>
+                      Firma criptográfica inmutable calculada para esta precisa versión de la transcripción.
+                    </span>
+                  </div>
+                </label>
+
+                <label
+                  style={{
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: '0.65rem',
+                    cursor: 'pointer',
+                    padding: '0.5rem 0.65rem',
+                    borderRadius: THEME_TOKENS.radii.xs,
+                    backgroundColor: '#ffffff',
+                    border: `1px solid ${THEME_TOKENS.colors.borderSubtle}`,
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={opcionesInforme.incluirCedulaHablantes ?? true}
+                    onChange={(e) =>
+                      setOpcionesInforme({ ...opcionesInforme, incluirCedulaHablantes: e.target.checked })
+                    }
+                    style={{ marginTop: '0.2rem', accentColor: THEME_TOKENS.colors.accentNavy }}
+                  />
+                  <div>
+                    <strong style={{ fontSize: '0.825rem', display: 'block', color: THEME_TOKENS.colors.textPrimary }}>
+                      3. Cédula de Personas Hablantes Identificadas
+                    </strong>
+                    <span style={{ fontSize: '0.725rem', color: THEME_TOKENS.colors.textSecondary }}>
+                      Tabla con IDs técnicos, nombres asignados, roles o cargos procesales e intervenciones.
+                    </span>
+                  </div>
+                </label>
+
+                <label
+                  style={{
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: '0.65rem',
+                    cursor: 'pointer',
+                    padding: '0.5rem 0.65rem',
+                    borderRadius: THEME_TOKENS.radii.xs,
+                    backgroundColor: '#ffffff',
+                    border: `1px solid ${THEME_TOKENS.colors.borderSubtle}`,
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={opcionesInforme.incluirNotasPericiales ?? true}
+                    onChange={(e) =>
+                      setOpcionesInforme({ ...opcionesInforme, incluirNotasPericiales: e.target.checked })
+                    }
+                    style={{ marginTop: '0.2rem', accentColor: THEME_TOKENS.colors.accentNavy }}
+                  />
+                  <div>
+                    <strong style={{ fontSize: '0.825rem', display: 'block', color: THEME_TOKENS.colors.textPrimary }}>
+                      4. Cuaderno de Notas y Observaciones Periciales
+                    </strong>
+                    <span style={{ fontSize: '0.725rem', color: THEME_TOKENS.colors.textSecondary }}>
+                      Observaciones fonéticas, sellos de tiempo relevantes y notas introducidas en el cuaderno.
+                    </span>
+                  </div>
+                </label>
+
+                <label
+                  style={{
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: '0.65rem',
+                    cursor: 'pointer',
+                    padding: '0.5rem 0.65rem',
+                    borderRadius: THEME_TOKENS.radii.xs,
+                    backgroundColor: '#ffffff',
+                    border: `1px solid ${THEME_TOKENS.colors.borderSubtle}`,
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={opcionesInforme.incluirCuerpoTranscripcion ?? true}
+                    onChange={(e) =>
+                      setOpcionesInforme({ ...opcionesInforme, incluirCuerpoTranscripcion: e.target.checked })
+                    }
+                    style={{ marginTop: '0.2rem', accentColor: THEME_TOKENS.colors.accentNavy }}
+                  />
+                  <div>
+                    <strong style={{ fontSize: '0.825rem', display: 'block', color: THEME_TOKENS.colors.textPrimary }}>
+                      5. Cuerpo Íntegro de la Transcripción Depurada
+                    </strong>
+                    <span style={{ fontSize: '0.725rem', color: THEME_TOKENS.colors.textSecondary }}>
+                      Texto íntegro ordenado cronológicamente con sellos [hh:mm:ss - hh:mm:ss] e interlocutores.
+                    </span>
+                  </div>
+                </label>
+
+                <label
+                  style={{
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: '0.65rem',
+                    cursor: 'pointer',
+                    padding: '0.5rem 0.65rem',
+                    borderRadius: THEME_TOKENS.radii.xs,
+                    backgroundColor: '#ffffff',
+                    border: `1px solid ${THEME_TOKENS.colors.borderSubtle}`,
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={opcionesInforme.incluirCertificacionValidez ?? true}
+                    onChange={(e) =>
+                      setOpcionesInforme({ ...opcionesInforme, incluirCertificacionValidez: e.target.checked })
+                    }
+                    style={{ marginTop: '0.2rem', accentColor: THEME_TOKENS.colors.accentNavy }}
+                  />
+                  <div>
+                    <strong style={{ fontSize: '0.825rem', display: 'block', color: THEME_TOKENS.colors.textPrimary }}>
+                      6. Certificación Formal de Validez Pericial
+                    </strong>
+                    <span style={{ fontSize: '0.725rem', color: THEME_TOKENS.colors.textSecondary }}>
+                      Cláusula formal de cotejo acústico y correspondencia probatoria fiel con el audio original.
+                    </span>
+                  </div>
+                </label>
+              </div>
+
+              {/* Botones de acción */}
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'flex-end',
+                  gap: '0.75rem',
+                  borderTop: `1px solid ${THEME_TOKENS.colors.borderSubtle}`,
+                  paddingTop: '0.75rem',
+                }}
+              >
+                <button
+                  onClick={() => setModalConfigInformeAbierto(false)}
+                  style={{
+                    padding: '0.45rem 1rem',
+                    borderRadius: THEME_TOKENS.radii.xs,
+                    border: `1px solid ${THEME_TOKENS.colors.borderSubtle}`,
+                    backgroundColor: THEME_TOKENS.colors.surfaceBase,
+                    color: THEME_TOKENS.colors.textSecondary,
+                    fontSize: '0.8rem',
+                    cursor: 'pointer',
+                    fontWeight: 600,
+                  }}
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={handleDescargarInformeConOpciones}
+                  style={{
+                    padding: '0.45rem 1.25rem',
+                    borderRadius: THEME_TOKENS.radii.xs,
+                    border: 'none',
+                    backgroundColor: '#1E4620',
+                    color: '#ffffff',
+                    fontSize: '0.8125rem',
+                    cursor: 'pointer',
+                    fontWeight: 700,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.4rem',
+                    boxShadow: THEME_TOKENS.shadows.sm,
+                  }}
+                >
+                  <span>📑</span>
+                  <span>Generar y Descargar Informe</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
