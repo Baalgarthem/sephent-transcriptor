@@ -1,14 +1,35 @@
 import React from 'react';
 import TranscriptionPanel from './components/TranscriptionPanel';
 import { THEME_TOKENS } from './config/themeTokens';
+import sephentLogo from './assets/sephent-3.svg';
 
 const App: React.FC = () => {
   return (
     <div className="app-viewport">
       <header className="app-header">
-        <h1 className="app-title font-serif">
-          Sephent Transcriptor
-        </h1>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '0.85rem',
+            marginBottom: '0.45rem',
+          }}
+        >
+          <img
+            src={sephentLogo}
+            alt="Logo Sephent"
+            style={{
+              width: '38px',
+              height: '38px',
+              objectFit: 'contain',
+              display: 'inline-block',
+            }}
+          />
+          <h1 className="app-title font-serif" style={{ margin: 0 }}>
+            Sephent Transcriptor
+          </h1>
+        </div>
         <p
           className="app-subtitle"
           style={{

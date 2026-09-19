@@ -552,7 +552,7 @@ export default function TranscriptionPanel(): React.ReactElement {
     setIsRunning(true);
     ModelManager.registrarUltimoModeloUtilizado(model);
     setProgress(0);
-    setStatusMessage(`Cargando modelo ${WHISPER_MODELS[model]?.nombreArchivo} desde la memoria local...`);
+    setStatusMessage(`Etapa 1 de 4: Preparando modelo ${WHISPER_MODELS[model]?.nombreArchivo} desde la memoria local...`);
 
     await new Promise((r) => setTimeout(r, 400));
 
@@ -564,7 +564,8 @@ export default function TranscriptionPanel(): React.ReactElement {
         }
 
         const file = files[i];
-        setStatusMessage(`Procesando archivo ${i + 1} de ${files.length}: "${file.name}" [Whisper: ${model}]...`);
+        const prefijoArchivo = files.length > 1 ? `[Archivo ${i + 1} de ${files.length}] ` : '';
+        setStatusMessage(`${prefijoArchivo}Etapa 1 de 4: Iniciando procesamiento de "${file.name}" [Whisper: ${model}]...`);
 
         let audioBlobUrl: string | undefined = undefined;
         try {
@@ -582,7 +583,7 @@ export default function TranscriptionPanel(): React.ReactElement {
           onProgreso: (porcentaje, mensaje) => {
             if (!cancelacionSolicitada.current) {
               setProgress(porcentaje);
-              setStatusMessage(`[${i + 1}/${files.length}] ${mensaje}`);
+              setStatusMessage(`${prefijoArchivo}${mensaje}`);
             }
           },
         });
@@ -1318,34 +1319,6 @@ export default function TranscriptionPanel(): React.ReactElement {
               {isRunning ? '⏳ Procesando transcripción...' : '▶ Iniciar Transcripción'}
             </button>
           </HoverTooltip>
-
-          {isRunning && (
-            <HoverTooltip content="Detiene inmediatamente el proceso en segundo plano y cancela la transcripción de forma limpia">
-              <button
-                onClick={handleCancelarTranscripcion}
-                disabled={isCanceling}
-                style={{
-                  padding: '0.85rem 1.75rem',
-                  backgroundColor: isCanceling ? '#991b1b' : '#dc2626',
-                  color: '#ffffff',
-                  border: '1px solid #b91c1c',
-                  borderRadius: THEME_TOKENS.radii.sm,
-                  fontSize: '0.95rem',
-                  fontFamily: THEME_TOKENS.fonts.sans,
-                  fontWeight: 600,
-                  letterSpacing: '0.02em',
-                  cursor: isCanceling ? 'not-allowed' : 'pointer',
-                  boxShadow: THEME_TOKENS.shadows.sm,
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '0.5rem',
-                  transition: `all ${THEME_TOKENS.transitions.fast}`,
-                }}
-              >
-                🛑 {isCanceling ? 'Cancelando...' : 'Cancelar Transcripción'}
-              </button>
-            </HoverTooltip>
-          )}
         </div>
 
         {/* Mensaje de estado y barra de progreso */}

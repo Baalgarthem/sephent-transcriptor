@@ -61,7 +61,7 @@ export class WhisperBridgeService {
       throw new Error('Tauri no disponible. Asegúrate de ejecutar en la aplicación de escritorio.');
     }
 
-    if (onProgreso) onProgreso(10, 'Iniciando motor de transcripción Whisper...');
+    if (onProgreso) onProgreso(10, 'Etapa 1 de 4: Iniciando motor de transcripción Whisper...');
 
     let unlisten: (() => void) | undefined = undefined;
 

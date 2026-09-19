@@ -368,14 +368,14 @@ def transcribir(file_path: str, model_name: str, language: str, num_speakers: in
     model_alias = {"turbo": "large-v3-turbo"}
     resolved_model = model_alias.get(model_name, model_name)
 
-    print(f"[whisper_runner] Cargando modelo: {resolved_model}", file=sys.stderr)
+    print(f"[whisper_runner] ETAPA 1/4: Cargando modelo: {resolved_model}", file=sys.stderr, flush=True)
     model = whisper.load_model(resolved_model)
 
     kwargs = {"word_timestamps": True, "verbose": None}
     if language and language.lower() not in ("auto", ""):
         kwargs["language"] = language
 
-    print(f"[whisper_runner] Transcribiendo: {os.path.basename(file_path)}", file=sys.stderr)
+    print(f"[whisper_runner] ETAPA 2/4: Transcribiendo audio: {os.path.basename(file_path)}", file=sys.stderr, flush=True)
     real_stdout = sys.stdout
     try:
         # Redirigir stdout a stderr durante la inferencia para que ningún mensaje
@@ -389,17 +389,19 @@ def transcribir(file_path: str, model_name: str, language: str, num_speakers: in
     detected_language = result.get("language", language)
     duration = segments_raw[-1]["end"] if segments_raw else 0.0
 
-    print(f"[whisper_runner] Segmentos: {len(segments_raw)}, idioma: {detected_language}", file=sys.stderr)
+    print(f"[whisper_runner] Segmentos: {len(segments_raw)}, idioma: {detected_language}", file=sys.stderr, flush=True)
 
     audio_np = None
     try:
         audio_np = whisper.load_audio(file_path)
     except Exception as e:
-        print(f"[whisper_runner] Aviso carga audio: {e}", file=sys.stderr)
+        print(f"[whisper_runner] Aviso carga audio: {e}", file=sys.stderr, flush=True)
 
+    print(f"[whisper_runner] ETAPA 3/4: Diarizando segmentos y discriminando interlocutores...", file=sys.stderr, flush=True)
     diarized = diarizar_segmentos(segments_raw, audio_np=audio_np,
                                   sample_rate=16000, num_speakers_forzado=num_speakers)
 
+    print(f"[whisper_runner] ETAPA 4/4: Sincronizando marcas de tiempo y estructurando expediente...", file=sys.stderr, flush=True)
     output_segments = []
     for i, seg in enumerate(diarized):
         start_ajustado, end_ajustado = ajustar_tiempos_precisos(

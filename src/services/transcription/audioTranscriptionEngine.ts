@@ -83,23 +83,23 @@ export class AudioTranscriptionEngine {
     }
 
     // --- Ruta 2: Entorno web / pruebas unitarias automatizadas (sin Tauri) ---
-    if (onProgreso) onProgreso(15, `Extrayendo muestras acústicas de "${file.name}"...`);
+    if (onProgreso) onProgreso(15, `Etapa 1 de 4: Extrayendo muestras acústicas de "${file.name}"...`);
 
     const infoAudio = await this.decodificarAudioOEstimar(file);
     const duracion = Math.max(2.5, infoAudio.duracion);
 
-    if (onProgreso) onProgreso(40, `Analizando actividad de audio (${duracion.toFixed(1)}s)...`);
+    if (onProgreso) onProgreso(40, `Etapa 2 de 4: Analizando actividad vocal y decodificando (${duracion.toFixed(1)}s)...`);
 
     // En tests o navegador puro: único hablante base
     const segmentos = this.estimarSegmentosMonologo(file.name, duracion, opciones.language);
     const speakerNames: Record<string, string> = { speaker_01: 'Persona 1' };
 
-    if (onProgreso) onProgreso(75, 'Generando formatos documentales...');
+    if (onProgreso) onProgreso(75, 'Etapa 3 de 4: Discriminando hablantes y estructurando turnos...');
 
     const txtContent = this.generarTextoPlano(file.name, opciones.model, opciones.language, segmentos, speakerNames);
     const srtContent = this.generarSubtitulosSrt(segmentos, speakerNames);
 
-    if (onProgreso) onProgreso(95, 'Estructurando salidas...');
+    if (onProgreso) onProgreso(95, 'Etapa 4 de 4: Generando formatos documentales (.txt, .srt)...');
 
     return { segments: segmentos, txtContent, srtContent, speakerNames, durationSeconds: duracion };
   }

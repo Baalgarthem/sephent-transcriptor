@@ -1055,7 +1055,7 @@ async fn transcribir_audio_whisper(
 
         let _ = window.emit("transcripcion-progreso", serde_json::json!({
             "porcentaje": 15,
-            "mensaje": format!("Cargando modelo {} en Python Whisper...", modelo_norm)
+            "mensaje": format!("Etapa 1 de 4: Cargando modelo {} en memoria...", modelo_norm)
         }));
 
         let mut child = cmd.spawn().map_err(|e| format!("Error al lanzar Python ({}) para transcripción: {}", info.python_ruta, e))?;
@@ -1077,16 +1077,19 @@ async fn transcribir_audio_whisper(
                     let trimmed = l.trim();
                     if !trimmed.is_empty() {
                         let mut pct = 45;
-                        let mut msg = format!("Transcribiendo audio con Whisper ({})...", modelo_clone);
-                        if trimmed.contains("Cargando modelo") {
-                            pct = 25;
-                            msg = format!("Cargando pesos del modelo {}...", modelo_clone);
-                        } else if trimmed.contains("Transcribiendo") {
+                        let mut msg = format!("Etapa 2 de 4: Transcribiendo audio con Whisper ({})...", modelo_clone);
+                        if trimmed.contains("ETAPA 1") || trimmed.contains("Cargando modelo") {
+                            pct = 20;
+                            msg = format!("Etapa 1 de 4: Cargando pesos del modelo {}...", modelo_clone);
+                        } else if trimmed.contains("ETAPA 2") || trimmed.contains("Transcribiendo") {
                             pct = 50;
-                            msg = "Extrayendo espectrograma y decodificando audio con Whisper...".to_string();
-                        } else if trimmed.contains("Segmentos:") {
-                            pct = 85;
-                            msg = "Finalizando decodificación y analizando interlocutores...".to_string();
+                            msg = "Etapa 2 de 4: Extrayendo espectrograma y decodificando audio con Whisper...".to_string();
+                        } else if trimmed.contains("ETAPA 3") || trimmed.contains("Diarizando") || trimmed.contains("Segmentos:") {
+                            pct = 75;
+                            msg = "Etapa 3 de 4: Diarizando voces y discriminando interlocutores...".to_string();
+                        } else if trimmed.contains("ETAPA 4") || trimmed.contains("Sincronizando") {
+                            pct = 90;
+                            msg = "Etapa 4 de 4: Sincronizando marcas de tiempo y estructurando expediente...".to_string();
                         }
                         let _ = window_clone.emit("transcripcion-progreso", serde_json::json!({
                             "porcentaje": pct,
