@@ -1108,16 +1108,37 @@ def detectar_dispositivo() -> tuple:
         return "cpu", False, f"CPU (torch no disponible: {e})"
 
 
-def transcribir(file_path: str, model_name: str, language: str,
-                num_speakers: int, device_override: str = "auto") -> dict:
-    """
-    Carga Whisper, transcribe y aplica diarización. Retorna dict ResultadoWhisper.
+def normalizar_audio_amplitud(audio_np: np.ndarray, target_peak: float = 0.95) -> np.ndarray:
+    """Normaliza la amplitud del audio para evitar recortes o caídas por debajo del umbral de VAD."""
+    if audio_np is None or len(audio_np) == 0:
+        return audio_np
+    try:
+        max_val = float(np.max(np.abs(audio_np)))
+        if max_val > 0.0001 and max_val < 0.2:
+            # Audio con muy bajo volumen: amplificar preservando rango dinámico
+            gain = min(target_peak / max_val, 4.0)
+            return audio_np * gain
+        elif max_val > 1.0:
+            # Atenuar picos de saturación
+            return (audio_np / max_val) * target_peak
+    except Exception:
+        pass
+    return audio_np
 
-    v0.2.0:
+
+def transcribir(file_path: str, model_name: str, language: str,
+                num_speakers: int, device_override: str = "auto",
+                diarize: bool = True) -> dict:
+    """
+    Carga Whisper, transcribe y opcionalmente aplica diarización. Retorna dict ResultadoWhisper.
+
+    v0.2.0 - v1.1.1:
+      - Diarización opcional: si diarize=False, genera transcripción continua rápida en 3 etapas.
       - Detección explícita de CUDA/GPU con fp16 automático
       - temperature=0 (greedy decoding) para mayor velocidad y determinismo
       - Liberación explícita del modelo GPU tras la transcripción
       - FFT global reutilizada en la diarización (AudioFFTCache)
+      - Normalización de amplitud para optimizar SNR y robustez de detección
     """
     import whisper
     import gc
@@ -1133,7 +1154,8 @@ def transcribir(file_path: str, model_name: str, language: str,
     else:
         device, fp16, device_info = detectar_dispositivo()
 
-    print(f"[whisper_runner] ETAPA 1/4: Cargando modelo: {resolved_model} en {device_info}", file=sys.stderr, flush=True)
+    total_etapas = "4" if diarize else "3"
+    print(f"[whisper_runner] ETAPA 1/{total_etapas}: Cargando modelo: {resolved_model} en {device_info}", file=sys.stderr, flush=True)
     model = whisper.load_model(resolved_model, device=device)
 
     # ── Candado de Idioma (v0.2.2) ────────────────────────────────────────────
@@ -1146,6 +1168,7 @@ def transcribir(file_path: str, model_name: str, language: str,
     if language and language.lower() not in ("auto", ""):
         try:
             audio_muestra = whisper.load_audio(file_path)
+            audio_muestra = normalizar_audio_amplitud(audio_muestra)
             audio_muestra = whisper.pad_or_trim(audio_muestra)
             n_mels = model.dims.n_mels
             mel_muestra = whisper.log_mel_spectrogram(audio_muestra, n_mels=n_mels).to(model.device)
@@ -1186,7 +1209,7 @@ def transcribir(file_path: str, model_name: str, language: str,
     if language_usado and language_usado.lower() not in ("auto", ""):
         kwargs["language"] = language_usado
 
-    print(f"[whisper_runner] ETAPA 2/4: Transcribiendo audio: {os.path.basename(file_path)}", file=sys.stderr, flush=True)
+    print(f"[whisper_runner] ETAPA 2/{total_etapas}: Transcribiendo audio: {os.path.basename(file_path)}", file=sys.stderr, flush=True)
     real_stdout = sys.stdout
     try:
         # Redirigir stdout a stderr durante la inferencia para que ningún mensaje
@@ -1206,11 +1229,11 @@ def transcribir(file_path: str, model_name: str, language: str,
     audio_np = None
     try:
         audio_np = whisper.load_audio(file_path)
+        audio_np = normalizar_audio_amplitud(audio_np)
     except Exception as e:
         print(f"[whisper_runner] Aviso carga audio: {e}", file=sys.stderr, flush=True)
 
-    # Liberar el modelo de la VRAM/RAM antes de la diarización intensiva
-    # Esto evita que el modelo y los vectores acústicos compitan por memoria
+    # Liberar el modelo de la VRAM/RAM antes de etapas posteriores
     try:
         del model
         if device == "cuda":
@@ -1220,6 +1243,34 @@ def transcribir(file_path: str, model_name: str, language: str,
         gc.collect()
     except Exception:
         pass
+
+    # ── RUTA RÁPIDA: Diarización Desactivada por el Usuario ─────────────────────
+    if not diarize:
+        print(f"[whisper_runner] ETAPA 3/3: Estructurando expediente y aplicando pulido ortográfico pericial...", file=sys.stderr, flush=True)
+        output_segments = []
+        for i, seg in enumerate(segments_raw):
+            start_t = round(float(seg.get("start", 0.0)), 3)
+            end_t = round(float(seg.get("end", 0.0)), 3)
+            avg_logprob = float(seg.get("avg_logprob", -0.1))
+            confidence = round(min(1.0, max(0.0, 1.0 + avg_logprob / 5.0)), 3)
+            texto_pulido = corregir_puntuacion_y_ortografia(seg.get("text", ""), idioma=detected_language)
+            output_segments.append({
+                "id": f"seg_{i + 1}",
+                "speakerId": "speaker_01",
+                "startTime": start_t,
+                "endTime": end_t,
+                "text": texto_pulido,
+                "confidence": confidence,
+            })
+
+        return {
+            "segments": output_segments,
+            "speakerNames": {"speaker_01": "Persona 1"},
+            "durationSeconds": round(duration, 3),
+            "modelUsed": resolved_model,
+            "language": detected_language,
+            "numSpeakers": 1,
+        }
 
     # ── ETAPA 3/4: Diarización de interlocutores ──────────────────────────────
     usar_pyannote = False
@@ -1321,6 +1372,8 @@ def main():
     parser.add_argument("--language", default="auto")
     parser.add_argument("--num-speakers", type=int, default=0,
                         help="0=auto, 1=monologo, 2=dialogo forzado")
+    parser.add_argument("--diarize", default="true",
+                        help="true/false para activar o desactivar la diarización de interlocutores")
     parser.add_argument("--device", default="auto",
                         help="Dispositivo de inferencia: auto, cuda, cpu (por defecto: auto)")
     args = parser.parse_args()
@@ -1329,8 +1382,17 @@ def main():
         print(json.dumps({"error": f"Archivo no encontrado: {args.file}"}))
         sys.exit(1)
 
+    diarize_enabled = str(args.diarize).strip().lower() not in ("false", "0", "no", "off", "f")
+
     try:
-        resultado = transcribir(args.file, args.model, args.language, args.num_speakers, args.device)
+        resultado = transcribir(
+            args.file,
+            args.model,
+            args.language,
+            args.num_speakers,
+            args.device,
+            diarize=diarize_enabled
+        )
         print(json.dumps(resultado, ensure_ascii=False))
     except Exception as e:
         print(json.dumps({"error": str(e)}))

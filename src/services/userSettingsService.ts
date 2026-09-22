@@ -29,6 +29,7 @@ export const ROLES_PREDEFINIDOS_CANONICOS: readonly string[] = [
 export interface ConfiguracionUsuario {
   modelo: string;
   idioma: IdiomaPreferido;
+  diarizarHablantes: boolean;
   outputTxt: boolean;
   outputSrt: boolean;
   outputVideo: boolean;
@@ -44,6 +45,7 @@ export class UserSettingsService {
   private static configuracionPorDefecto: ConfiguracionUsuario = {
     modelo: DEFAULT_MODEL,
     idioma: 'auto',
+    diarizarHablantes: true,
     outputTxt: true,
     outputSrt: false,
     outputVideo: false,
@@ -86,6 +88,7 @@ export class UserSettingsService {
     const configFinal: ConfiguracionUsuario = {
       modelo: modeloResuelto,
       idioma: (configRecuperada.idioma as IdiomaPreferido) || this.configuracionPorDefecto.idioma,
+      diarizarHablantes: typeof configRecuperada.diarizarHablantes === 'boolean' ? configRecuperada.diarizarHablantes : this.configuracionPorDefecto.diarizarHablantes,
       outputTxt: typeof configRecuperada.outputTxt === 'boolean' ? configRecuperada.outputTxt : this.configuracionPorDefecto.outputTxt,
       outputSrt: typeof configRecuperada.outputSrt === 'boolean' ? configRecuperada.outputSrt : this.configuracionPorDefecto.outputSrt,
       outputVideo: typeof configRecuperada.outputVideo === 'boolean' ? configRecuperada.outputVideo : this.configuracionPorDefecto.outputVideo,

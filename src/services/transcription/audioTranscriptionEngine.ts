@@ -23,6 +23,7 @@ import { WhisperBridgeService, ResultadoWhisper } from './whisperBridgeService';
 export interface OpcionesProcesamiento {
   model: string;
   language: string;
+  diarizar?: boolean;
   onProgreso?: (porcentaje: number, mensaje: string) => void;
 }
 
@@ -45,7 +46,7 @@ export class AudioTranscriptionEngine {
     file: File | { name: string; size: number; arrayBuffer?: () => Promise<ArrayBuffer> },
     opciones: OpcionesProcesamiento
   ): Promise<ResultadoProcesamientoAudio> {
-    const { onProgreso } = opciones;
+    const { onProgreso, diarizar = true } = opciones;
 
     // --- Ruta 1: Transcripcion real con Whisper (entorno Tauri desktop) ---
     if (WhisperBridgeService.esModoDesktop()) {
@@ -55,6 +56,7 @@ export class AudioTranscriptionEngine {
           {
             modelo: opciones.model,
             idioma: opciones.language,
+            diarizar,
             numSpeakers: 0, // 0 = deteccion automatica
             onProgreso,
           }
@@ -66,7 +68,7 @@ export class AudioTranscriptionEngine {
         );
         const srtContent = this.generarSubtitulosSrt(resultado.segments, resultado.speakerNames);
 
-        if (onProgreso) onProgreso(100, 'Transcripcion completada con exito.');
+        if (onProgreso) onProgreso(100, 'Transcripción completada con éxito.');
 
         return {
           segments: resultado.segments,
@@ -83,23 +85,26 @@ export class AudioTranscriptionEngine {
     }
 
     // --- Ruta 2: Entorno web / pruebas unitarias automatizadas (sin Tauri) ---
-    if (onProgreso) onProgreso(15, `Etapa 1 de 4: Extrayendo muestras acústicas de "${file.name}"...`);
+    const totalEtapas = diarizar ? '4' : '3';
+    if (onProgreso) onProgreso(15, `Etapa 1 de ${totalEtapas}: Extrayendo muestras acústicas de "${file.name}"...`);
 
     const infoAudio = await this.decodificarAudioOEstimar(file);
     const duracion = Math.max(2.5, infoAudio.duracion);
 
-    if (onProgreso) onProgreso(40, `Etapa 2 de 4: Analizando actividad vocal y decodificando (${duracion.toFixed(1)}s)...`);
+    if (onProgreso) onProgreso(40, `Etapa 2 de ${totalEtapas}: Analizando actividad vocal y decodificando (${duracion.toFixed(1)}s)...`);
 
     // En tests o navegador puro: único hablante base
     const segmentos = this.estimarSegmentosMonologo(file.name, duracion, opciones.language);
     const speakerNames: Record<string, string> = { speaker_01: 'Persona 1' };
 
-    if (onProgreso) onProgreso(75, 'Etapa 3 de 4: Discriminando hablantes y estructurando turnos...');
+    if (diarizar) {
+      if (onProgreso) onProgreso(75, 'Etapa 3 de 4: Discriminando hablantes y estructurando turnos...');
+    }
 
     const txtContent = this.generarTextoPlano(file.name, opciones.model, opciones.language, segmentos, speakerNames);
     const srtContent = this.generarSubtitulosSrt(segmentos, speakerNames);
 
-    if (onProgreso) onProgreso(95, 'Etapa 4 de 4: Generando formatos documentales (.txt, .srt)...');
+    if (onProgreso) onProgreso(95, `Etapa ${totalEtapas} de ${totalEtapas}: Generando formatos documentales (.txt, .srt)...`);
 
     return { segments: segmentos, txtContent, srtContent, speakerNames, durationSeconds: duracion };
   }

@@ -25,6 +25,7 @@ export interface ResultadoWhisper {
 export interface OpcionesWhisper {
   modelo: string;
   idioma: string;
+  diarizar?: boolean;
   numSpeakers?: number; // 0=auto, 1=monologo, 2=dialogo forzado
   onProgreso?: (porcentaje: number, mensaje: string) => void;
 }
@@ -54,14 +55,15 @@ export class WhisperBridgeService {
     filePath: string,
     opciones: OpcionesWhisper
   ): Promise<ResultadoWhisper> {
-    const { modelo, idioma, onProgreso } = opciones;
+    const { modelo, idioma, diarizar = true, onProgreso } = opciones;
 
     const tauri = (window as any).__TAURI__;
     if (!tauri?.invoke) {
       throw new Error('Tauri no disponible. Asegúrate de ejecutar en la aplicación de escritorio.');
     }
 
-    if (onProgreso) onProgreso(10, 'Etapa 1 de 4: Iniciando motor de transcripción Whisper...');
+    const totalEtapas = diarizar ? '4' : '3';
+    if (onProgreso) onProgreso(10, `Etapa 1 de ${totalEtapas}: Iniciando motor de transcripción Whisper...`);
 
     let unlisten: (() => void) | undefined = undefined;
 
@@ -85,6 +87,7 @@ export class WhisperBridgeService {
         rutaAudio: filePath,
         modelo,
         idioma: idioma || 'auto',
+        diarizar,
       });
 
       if (unlisten) unlisten();

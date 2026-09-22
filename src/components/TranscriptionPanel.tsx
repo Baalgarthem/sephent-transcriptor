@@ -36,6 +36,7 @@ export default function TranscriptionPanel(): React.ReactElement {
     return (configInicial.modelo as ModelKey) || 'base';
   });
   const [language, setLanguage] = useState<LanguageOption>(configInicial.idioma as LanguageOption);
+  const [diarizarHablantes, setDiarizarHablantes] = useState<boolean>(configInicial.diarizarHablantes ?? true);
   const [outputTxt, setOutputTxt] = useState(configInicial.outputTxt);
   const [outputSrt, setOutputSrt] = useState(configInicial.outputSrt);
   const [outputVideo, setOutputVideo] = useState(configInicial.outputVideo);
@@ -552,7 +553,8 @@ export default function TranscriptionPanel(): React.ReactElement {
     setIsRunning(true);
     ModelManager.registrarUltimoModeloUtilizado(model);
     setProgress(0);
-    setStatusMessage(`Etapa 1 de 4: Preparando modelo ${WHISPER_MODELS[model]?.nombreArchivo} desde la memoria local...`);
+    const totalEtapas = diarizarHablantes ? '4' : '3';
+    setStatusMessage(`Etapa 1 de ${totalEtapas}: Preparando modelo ${WHISPER_MODELS[model]?.nombreArchivo} desde la memoria local...`);
 
     await new Promise((r) => setTimeout(r, 400));
 
@@ -565,7 +567,7 @@ export default function TranscriptionPanel(): React.ReactElement {
 
         const file = files[i];
         const prefijoArchivo = files.length > 1 ? `[Archivo ${i + 1} de ${files.length}] ` : '';
-        setStatusMessage(`${prefijoArchivo}Etapa 1 de 4: Iniciando procesamiento de "${file.name}" [Whisper: ${model}]...`);
+        setStatusMessage(`${prefijoArchivo}Etapa 1 de ${totalEtapas}: Iniciando procesamiento de "${file.name}" [Whisper: ${model}]...`);
 
         let audioBlobUrl: string | undefined = undefined;
         try {
@@ -576,10 +578,11 @@ export default function TranscriptionPanel(): React.ReactElement {
           // Ignorar si no está disponible URL.createObjectURL en el entorno
         }
 
-        // Procesamiento acústico real con VAD y diarización
+        // Procesamiento acústico real con VAD y diarización (opcional)
         const resultadoAudio = await AudioTranscriptionEngine.procesarArchivo(file, {
           model,
           language,
+          diarizar: diarizarHablantes,
           onProgreso: (porcentaje, mensaje) => {
             if (!cancelacionSolicitada.current) {
               setProgress(porcentaje);
@@ -1222,11 +1225,42 @@ export default function TranscriptionPanel(): React.ReactElement {
           </HoverTooltip>
         </div>
 
-        {/* 4. Opciones de Salida Documental */}
+        {/* 4. Diarización de Interlocutores (Hablantes) */}
+        <div style={{ marginBottom: '1.75rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
+            <label style={{ fontWeight: 600, color: THEME_TOKENS.colors.textPrimary, fontSize: '0.875rem' }}>
+              4. Identificación y discriminación de hablantes (Diarización)
+            </label>
+            <InfoHelpButton
+              tooltip="Activa la separación e identificación de interlocutores (Persona 1, Persona 2, etc.) mediante pyannote.audio y análisis espectral. Si se desmarca, se realiza una transcripción continua de alta velocidad sin segmentar por hablantes."
+            />
+          </div>
+          <HoverTooltip content="Activa o desactiva la diarización. Al desmarcarla, se genera una transcripción continua sin discriminación de hablantes." maxWidth="350px">
+            <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.65rem', cursor: 'pointer', fontSize: '0.875rem', color: THEME_TOKENS.colors.textPrimary, backgroundColor: THEME_TOKENS.colors.bgCanvas, padding: '0.6rem 0.9rem', borderRadius: THEME_TOKENS.radii.sm, border: `1px solid ${THEME_TOKENS.colors.borderSubtle}` }}>
+              <input
+                type="checkbox"
+                checked={diarizarHablantes}
+                onChange={(e) => {
+                  setDiarizarHablantes(e.target.checked);
+                  UserSettingsService.guardarConfiguracion({ diarizarHablantes: e.target.checked });
+                }}
+                disabled={isRunning}
+                style={{ accentColor: THEME_TOKENS.colors.surfaceDark, width: '16px', height: '16px', cursor: 'pointer' }}
+              />
+              <span style={{ fontWeight: 500 }}>
+                {diarizarHablantes
+                  ? '👥 Diarización activa (Identificar y separar interlocutores)'
+                  : '📄 Transcripción continua (Sin diarización ni separación de voces)'}
+              </span>
+            </label>
+          </HoverTooltip>
+        </div>
+
+        {/* 5. Opciones de Salida Documental */}
         <div style={{ marginBottom: '2rem', paddingTop: '0.5rem', borderTop: `1px solid ${THEME_TOKENS.colors.borderSubtle}` }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', margin: '0.85rem 0 0.6rem 0' }}>
             <strong style={{ color: THEME_TOKENS.colors.textPrimary, fontSize: '0.875rem' }}>
-              4. Formatos y actas de salida requeridas:
+              5. Formatos y actas de salida requeridas:
             </strong>
             <InfoHelpButton
               tooltip="Selecciona qué actas deseas emitir. Cada archivo generado preservará exactamente el nombre de tu archivo de origen cambiando solo la extensión."

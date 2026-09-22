@@ -1009,6 +1009,7 @@ async fn transcribir_audio_whisper(
     ruta_audio: String,
     modelo: String,
     idioma: String,
+    diarizar: Option<bool>,
     window: Window,
 ) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
@@ -1047,6 +1048,7 @@ async fn transcribir_audio_whisper(
         } else {
             idioma.to_lowercase()
         };
+        let diarizar_activo = diarizar.unwrap_or(true);
 
         let mut cmd = Command::new(&info.python_ruta);
         let mut python_path_entries = vec![temp_dir.to_string_lossy().to_string()];
@@ -1070,6 +1072,8 @@ async fn transcribir_audio_whisper(
         cmd.arg(&idioma_norm);
         cmd.arg("--num-speakers");
         cmd.arg("0");
+        cmd.arg("--diarize");
+        cmd.arg(if diarizar_activo { "true" } else { "false" });
         // v0.2.0: permitir que Python detecte y use CUDA/GPU automáticamente
         cmd.arg("--device");
         cmd.arg("auto");
@@ -1078,9 +1082,10 @@ async fn transcribir_audio_whisper(
         cmd.stderr(Stdio::piped());
         configurar_proceso_oculto(&mut cmd);
 
+        let total_etapas = if diarizar_activo { 4 } else { 3 };
         let _ = window.emit("transcripcion-progreso", serde_json::json!({
             "porcentaje": 15,
-            "mensaje": format!("Etapa 1 de 4: Cargando modelo {} en memoria...", modelo_norm)
+            "mensaje": format!("Etapa 1 de {}: Cargando modelo {} en memoria...", total_etapas, modelo_norm)
         }));
 
         let mut child = cmd.spawn().map_err(|e| format!("Error al lanzar Python ({}) para transcripción: {}", info.python_ruta, e))?;
@@ -1102,31 +1107,35 @@ async fn transcribir_audio_whisper(
                     let trimmed = l.trim();
                     if !trimmed.is_empty() {
                         let mut pct = 45;
-                        let mut msg = format!("Etapa 2 de 4: Transcribiendo audio con Whisper ({})...", modelo_clone);
+                        let mut msg = if diarizar_activo {
+                            format!("Etapa 2 de 4: Transcribiendo audio con Whisper ({})...", modelo_clone)
+                        } else {
+                            format!("Etapa 2 de 3: Transcribiendo y decodificando audio con Whisper ({})...", modelo_clone)
+                        };
+
                         if trimmed.contains("ETAPA 1") || trimmed.contains("Cargando modelo") {
                             pct = 20;
-                            // v0.2.0: mostrar si se usa GPU (CUDA) o CPU en el mensaje de la Etapa 1
-                            if trimmed.contains("GPU NVIDIA") {
-                                let dispositivo = if let Some(start) = trimmed.find("GPU NVIDIA") {
+                            let disp = if trimmed.contains("GPU NVIDIA") {
+                                if let Some(start) = trimmed.find("GPU NVIDIA") {
                                     let sub = &trimmed[start..];
                                     let end = sub.find(')').map(|i| i + 1).unwrap_or(sub.len());
-                                    sub[..end].to_string()
+                                    format!("{} (CUDA)", &sub[..end])
                                 } else {
-                                    "GPU NVIDIA".to_string()
-                                };
-                                msg = format!("Etapa 1 de 4: Cargando modelo {} en {} (CUDA)...", modelo_clone, dispositivo);
+                                    "GPU NVIDIA (CUDA)".to_string()
+                                }
                             } else {
-                                msg = format!("Etapa 1 de 4: Cargando pesos del modelo {} en CPU...", modelo_clone);
-                            }
+                                "CPU".to_string()
+                            };
+                            msg = format!("Etapa 1 de {}: Cargando modelo {} en {}...", total_etapas, modelo_clone, disp);
                         } else if trimmed.contains("ETAPA 2") || trimmed.contains("Transcribiendo") {
-                            pct = 50;
-                            msg = "Etapa 2 de 4: Extrayendo espectrograma y decodificando audio con Whisper...".to_string();
-                        } else if trimmed.contains("ETAPA 3") || trimmed.contains("Diarizando") || trimmed.contains("Segmentos:") {
+                            pct = if diarizar_activo { 50 } else { 60 };
+                            msg = format!("Etapa 2 de {}: Extrayendo espectrograma y decodificando audio con Whisper...", total_etapas);
+                        } else if diarizar_activo && (trimmed.contains("ETAPA 3") || trimmed.contains("Diarizando") || trimmed.contains("Segmentos:")) {
                             pct = 75;
                             msg = "Etapa 3 de 4: Diarizando voces y discriminando interlocutores...".to_string();
-                        } else if trimmed.contains("ETAPA 4") || trimmed.contains("Sincronizando") {
+                        } else if trimmed.contains("ETAPA 4") || trimmed.contains("ETAPA 3/3") || trimmed.contains("Sincronizando") || trimmed.contains("Estructurando") {
                             pct = 90;
-                            msg = "Etapa 4 de 4: Sincronizando marcas de tiempo y estructurando expediente...".to_string();
+                            msg = format!("Etapa {} de {}: Estructurando expediente y aplicando pulido ortográfico...", total_etapas, total_etapas);
                         }
                         let _ = window_clone.emit("transcripcion-progreso", serde_json::json!({
                             "porcentaje": pct,
