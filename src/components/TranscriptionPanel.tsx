@@ -981,348 +981,420 @@ export default function TranscriptionPanel(): React.ReactElement {
           </span>
         </div>
 
-        {/* 1. Selección de Archivos con Botón Centrado y Cola Dinámica */}
-        <div style={{ marginBottom: '1.75rem' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
-            <label style={{ fontWeight: 600, color: THEME_TOKENS.colors.textPrimary, fontSize: '0.875rem' }}>
-              1. Documentos de audio o video a procesar
-            </label>
-            <InfoHelpButton
-              tooltip="Arrastra o examina archivos de audio o video (.mp3, .wav, .m4a, .mp4, etc.). El nombre de tus archivos de origen se preservará idéntico en todas las salidas generadas."
-              onClick={() => {
-                setSeccionAyudaInicial('general');
-                setModalAyudaAbierto(true);
-              }}
-            />
-          </div>
-          <div
-            style={{
-              border: `1px dashed ${THEME_TOKENS.colors.borderStrong}`,
-              borderRadius: THEME_TOKENS.radii.sm,
-              backgroundColor: THEME_TOKENS.colors.bgCanvas,
-              padding: '1.75rem 1.25rem',
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              textAlign: 'center',
-            }}
-          >
-            <div
-              className="examine-btn-container"
-              style={{
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                justifyContent: 'center',
-                textAlign: 'center',
-                margin: '0.5rem auto',
-                width: '100%',
-              }}
-            >
-              <HoverTooltip content="Abre el selector de archivos para agregar audios o videos a la cola">
-                <button
-                  type="button"
-                  onClick={handleExaminarArchivos}
-                  disabled={isRunning}
-                  className="examine-btn"
+        {/* ── Contenedor Principal — dos columnas ────────────────────────────────── */}
+        <div
+          className="two-col-config-grid"
+          style={{
+            display: 'grid',
+            gridTemplateColumns: '1fr 1fr',
+            gap: '1.5rem',
+            marginBottom: '1.75rem',
+          }}
+        >
+
+          {/* ═══ COLUMNA IZQUIERDA: Pasos 1 y 2 ══════════════════════════════════ */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1.75rem' }}>
+
+            {/* 1. Selección de Archivos */}
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
+                <label style={{ fontWeight: 600, color: THEME_TOKENS.colors.textPrimary, fontSize: '0.875rem' }}>
+                  1. Documentos de audio o video a procesar
+                </label>
+                <InfoHelpButton
+                  tooltip="Arrastra o examina archivos de audio o video (.mp3, .wav, .m4a, .mp4, etc.). El nombre de tus archivos de origen se preservará idéntico en todas las salidas generadas."
+                  onClick={() => {
+                    setSeccionAyudaInicial('general');
+                    setModalAyudaAbierto(true);
+                  }}
+                />
+              </div>
+              <div
+                style={{
+                  border: `1px dashed ${THEME_TOKENS.colors.borderStrong}`,
+                  borderRadius: THEME_TOKENS.radii.sm,
+                  backgroundColor: THEME_TOKENS.colors.bgCanvas,
+                  padding: '1.75rem 1.25rem',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  textAlign: 'center',
+                }}
+              >
+                <div
+                  className="examine-btn-container"
                   style={{
-                    display: 'inline-flex',
+                    display: 'flex',
+                    flexDirection: 'column',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    margin: '0 auto',
                     textAlign: 'center',
-                    gap: '0.6rem',
-                    padding: '0.75rem 2rem',
-                    cursor: isRunning ? 'not-allowed' : 'pointer',
-                    backgroundColor: THEME_TOKENS.colors.surfaceBase,
-                    border: `1px solid ${THEME_TOKENS.colors.borderStrong}`,
-                    borderRadius: THEME_TOKENS.radii.sm,
-                    color: THEME_TOKENS.colors.textPrimary,
-                    fontSize: '0.875rem',
-                    fontWeight: 600,
+                    margin: '0.5rem auto',
+                    width: '100%',
                   }}
                 >
-                  <span>📁</span> Examinar archivos de audio o video
-                </button>
-              </HoverTooltip>
-              <input
-                id="sephent-input-archivos"
-                type="file"
-                multiple
-                accept="audio/*,video/*"
-                onChange={handleFileChange}
-                disabled={isRunning}
-                style={{ display: 'none' }}
-              />
-              <span style={{ fontSize: '0.75rem', color: THEME_TOKENS.colors.textMuted, marginTop: '0.55rem', textAlign: 'center', display: 'block' }}>
-                Formatos compatibles: WAV, MP3, M4A, FLAC, MP4, MKV, MOV (puedes arrastrar archivos o examinar varias veces)
-              </span>
-            </div>
-
-            {/* Listado de Archivos Cargados en Cola */}
-            {files.length > 0 && (
-              <div className="file-queue-container">
-                <div className="file-queue-header">
-                  <span>Archivos en cola para transcripción ({files.length})</span>
-                  <button
-                    type="button"
-                    onClick={handleLimpiarCola}
+                  <HoverTooltip content="Abre el selector de archivos para agregar audios o videos a la cola">
+                    <button
+                      type="button"
+                      onClick={handleExaminarArchivos}
+                      disabled={isRunning}
+                      className="examine-btn"
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        margin: '0 auto',
+                        textAlign: 'center',
+                        gap: '0.6rem',
+                        padding: '0.75rem 2rem',
+                        cursor: isRunning ? 'not-allowed' : 'pointer',
+                        backgroundColor: THEME_TOKENS.colors.surfaceBase,
+                        border: `1px solid ${THEME_TOKENS.colors.borderStrong}`,
+                        borderRadius: THEME_TOKENS.radii.sm,
+                        color: THEME_TOKENS.colors.textPrimary,
+                        fontSize: '0.875rem',
+                        fontWeight: 600,
+                      }}
+                    >
+                      <span>📁</span> Examinar archivos de audio o video
+                    </button>
+                  </HoverTooltip>
+                  <input
+                    id="sephent-input-archivos"
+                    type="file"
+                    multiple
+                    accept="audio/*,video/*"
+                    onChange={handleFileChange}
                     disabled={isRunning}
-                    style={{
-                      background: 'transparent',
-                      border: 'none',
-                      color: THEME_TOKENS.colors.textMuted,
-                      fontSize: '0.75rem',
-                      cursor: 'pointer',
-                      textDecoration: 'underline',
-                    }}
-                  >
-                    Vaciar cola
-                  </button>
+                    style={{ display: 'none' }}
+                  />
+                  <span style={{ fontSize: '0.75rem', color: THEME_TOKENS.colors.textMuted, marginTop: '0.55rem', textAlign: 'center', display: 'block' }}>
+                    Formatos compatibles: WAV, MP3, M4A, FLAC, MP4, MKV, MOV (puedes arrastrar archivos o examinar varias veces)
+                  </span>
                 </div>
 
-                {files.map((file, idx) => {
-                  const esVideo = esArchivoVideo(file);
-                  return (
-                    <div key={`${file.name}_${idx}`} className="file-queue-item">
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flex: 1, minWidth: 0 }}>
-                        <span className={esVideo ? 'file-badge-video' : 'file-badge-audio'}>
-                          {esVideo ? '🎬 Video' : '🎵 Audio'}
-                        </span>
-                        <span
-                          className="file-name-truncate"
-                          title={file.name}
-                        >
-                          {file.name}
-                        </span>
-                        <span style={{ fontSize: '0.725rem', color: THEME_TOKENS.colors.textMuted, flexShrink: 0 }}>
-                          ({formatearTamano(file.size)})
-                        </span>
-                      </div>
+                {/* Cola de archivos */}
+                {files.length > 0 && (
+                  <div className="file-queue-container">
+                    <div className="file-queue-header">
+                      <span>Archivos en cola para transcripción ({files.length})</span>
                       <button
                         type="button"
-                        onClick={() => handleRetirarArchivo(idx)}
+                        onClick={handleLimpiarCola}
                         disabled={isRunning}
-                        className="file-remove-btn"
-                        title={`Retirar "${file.name}" de la cola`}
+                        style={{
+                          background: 'transparent',
+                          border: 'none',
+                          color: THEME_TOKENS.colors.textMuted,
+                          fontSize: '0.75rem',
+                          cursor: 'pointer',
+                          textDecoration: 'underline',
+                        }}
                       >
-                        ✕
+                        Vaciar cola
                       </button>
                     </div>
-                  );
-                })}
+
+                    {files.map((file, idx) => {
+                      const esVideo = esArchivoVideo(file);
+                      return (
+                        <div key={`${file.name}_${idx}`} className="file-queue-item">
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flex: 1, minWidth: 0 }}>
+                            <span className={esVideo ? 'file-badge-video' : 'file-badge-audio'}>
+                              {esVideo ? '🎬 Video' : '🎵 Audio'}
+                            </span>
+                            <span className="file-name-truncate" title={file.name}>
+                              {file.name}
+                            </span>
+                            <span style={{ fontSize: '0.725rem', color: THEME_TOKENS.colors.textMuted, flexShrink: 0 }}>
+                              ({formatearTamano(file.size)})
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleRetirarArchivo(idx)}
+                            disabled={isRunning}
+                            className="file-remove-btn"
+                            title={`Retirar "${file.name}" de la cola`}
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
-            )}
-          </div>
-        </div>
+            </div>{/* /Paso 1 */}
 
-        {/* 2. Selector de Modelo Whisper y Estado */}
-        <div style={{ marginBottom: '1.75rem' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem', flexWrap: 'wrap', gap: '0.25rem' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <label style={{ fontWeight: 600, color: THEME_TOKENS.colors.textPrimary, fontSize: '0.875rem' }}>
-                2. Modelo OpenAI Whisper
-              </label>
-              <InfoHelpButton
-                tooltip="Modelos de IA: Tiny y Base son muy rápidos para pruebas; Small y Medium otorgan un gran equilibrio profesional pericial; Large otorga la máxima fidelidad forense."
-                onClick={() => {
-                  setSeccionAyudaInicial('modelos');
-                  setModalAyudaAbierto(true);
-                }}
-              />
-            </div>
-            <span
-              style={{
-                fontSize: '0.7rem',
-                fontWeight: 600,
-                letterSpacing: '0.03em',
-                color: modeloDisponibleLocalmente ? THEME_TOKENS.colors.stateSuccess : THEME_TOKENS.colors.stateWarning,
-                backgroundColor: modeloDisponibleLocalmente ? THEME_TOKENS.colors.stateSuccessBg : THEME_TOKENS.colors.stateWarningBg,
-                border: `1px solid ${modeloDisponibleLocalmente ? THEME_TOKENS.colors.stateSuccessBorder : THEME_TOKENS.colors.stateWarningBorder}`,
-                padding: '0.15rem 0.55rem',
-                borderRadius: THEME_TOKENS.radii.xs,
-              }}
-            >
-              {modeloDisponibleLocalmente ? '✓ Disponible' : '⚠️ No descargado'}
-            </span>
-          </div>
-
-          <HoverTooltip content={`Modelo activo: ${WHISPER_MODELS[model]?.nombreVisible}. ${WHISPER_MODELS[model]?.descripcion}`} maxWidth="340px">
-            <select
-              value={model}
-              onChange={handleCambioModelo}
-              disabled={isRunning}
-              style={{
-                width: '100%',
-                padding: '0.65rem 0.85rem',
-                borderRadius: THEME_TOKENS.radii.sm,
-                border: `1px solid ${THEME_TOKENS.colors.borderStrong}`,
-                fontSize: '0.875rem',
-                backgroundColor: THEME_TOKENS.colors.surfaceBase,
-                color: THEME_TOKENS.colors.textPrimary,
-                fontFamily: THEME_TOKENS.fonts.sans,
-                outline: 'none',
-                transition: `border-color ${THEME_TOKENS.transitions.fast}`,
-              }}
-              onFocus={(e) => (e.currentTarget.style.borderColor = THEME_TOKENS.colors.borderFocus)}
-              onBlur={(e) => (e.currentTarget.style.borderColor = THEME_TOKENS.colors.borderStrong)}
-            >
-              {Object.entries(WHISPER_MODELS).map(([key, cfg]) => (
-                <option key={key} value={key}>
-                  {cfg.nombreVisible} — Archivo: {cfg.nombreArchivo} ({cfg.tamanoAproximadoMB} MB)
-                </option>
-              ))}
-            </select>
-          </HoverTooltip>
-          <span style={{ fontSize: '0.775rem', color: THEME_TOKENS.colors.textSecondary, marginTop: '0.35rem', display: 'block' }}>
-            {WHISPER_MODELS[model]?.descripcion}
-          </span>
-        </div>
-
-        {/* 3. Selector de Idioma */}
-        <div style={{ marginBottom: '1.75rem' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
-            <label style={{ fontWeight: 600, color: THEME_TOKENS.colors.textPrimary, fontSize: '0.875rem' }}>
-              3. Idioma del registro sonoro
-            </label>
-            <InfoHelpButton
-              tooltip="Permite que el modelo detecte automáticamente el idioma o fija Español/Inglés para máxima precisión y evitar traducciones involuntarias."
-            />
-          </div>
-          <HoverTooltip content="Configura el idioma de transcripción: detección automática o forzado en un idioma específico" maxWidth="320px">
-            <select
-              value={language}
-              onChange={(e) => {
-                const nuevoIdioma = e.target.value as LanguageOption;
-                setLanguage(nuevoIdioma);
-                UserSettingsService.guardarConfiguracion({ idioma: nuevoIdioma });
-              }}
-              disabled={isRunning}
-              style={{
-                width: '100%',
-                padding: '0.65rem 0.85rem',
-                borderRadius: THEME_TOKENS.radii.sm,
-                border: `1px solid ${THEME_TOKENS.colors.borderStrong}`,
-                fontSize: '0.875rem',
-                backgroundColor: THEME_TOKENS.colors.surfaceBase,
-                color: THEME_TOKENS.colors.textPrimary,
-                fontFamily: THEME_TOKENS.fonts.sans,
-                outline: 'none',
-              }}
-              onFocus={(e) => (e.currentTarget.style.borderColor = THEME_TOKENS.colors.borderFocus)}
-              onBlur={(e) => (e.currentTarget.style.borderColor = THEME_TOKENS.colors.borderStrong)}
-            >
-              <option value="auto">🌐 Detección automática de idioma</option>
-              <option value="es">Español (Castellano)</option>
-              <option value="en">Inglés (English)</option>
-              <option value="fr">Francés (Français)</option>
-              <option value="de">Alemán (Deutsch)</option>
-              <option value="it">Italiano (Italiano)</option>
-              <option value="pt">Portugués (Português)</option>
-              <option value="zh">Chino (Mandarin)</option>
-            </select>
-          </HoverTooltip>
-        </div>
-
-        {/* 4. Diarización de Interlocutores (Hablantes) */}
-        <div style={{ marginBottom: '1.75rem' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
-            <label style={{ fontWeight: 600, color: THEME_TOKENS.colors.textPrimary, fontSize: '0.875rem' }}>
-              4. Identificación y discriminación de hablantes (Diarización)
-            </label>
-            <InfoHelpButton
-              tooltip="Activa la separación e identificación de interlocutores (Persona 1, Persona 2, etc.) mediante pyannote.audio y análisis espectral. Si se desmarca, se realiza una transcripción continua de alta velocidad sin segmentar por hablantes."
-            />
-          </div>
-          <HoverTooltip content="Activa o desactiva la diarización. Al desmarcarla, se genera una transcripción continua sin discriminación de hablantes." maxWidth="350px">
-            <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.65rem', cursor: 'pointer', fontSize: '0.875rem', color: THEME_TOKENS.colors.textPrimary, backgroundColor: THEME_TOKENS.colors.bgCanvas, padding: '0.6rem 0.9rem', borderRadius: THEME_TOKENS.radii.sm, border: `1px solid ${THEME_TOKENS.colors.borderSubtle}` }}>
-              <input
-                type="checkbox"
-                checked={diarizarHablantes}
-                onChange={(e) => {
-                  setDiarizarHablantes(e.target.checked);
-                  UserSettingsService.guardarConfiguracion({ diarizarHablantes: e.target.checked });
-                }}
-                disabled={isRunning}
-                style={{ accentColor: THEME_TOKENS.colors.surfaceDark, width: '16px', height: '16px', cursor: 'pointer' }}
-              />
-              <span style={{ fontWeight: 500 }}>
-                {diarizarHablantes
-                  ? '👥 Diarización activa (Identificar y separar interlocutores)'
-                  : '📄 Transcripción continua (Sin diarización ni separación de voces)'}
+            {/* 2. Selector de Modelo Whisper */}
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem', flexWrap: 'wrap', gap: '0.25rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <label style={{ fontWeight: 600, color: THEME_TOKENS.colors.textPrimary, fontSize: '0.875rem' }}>
+                    2. Modelo OpenAI Whisper
+                  </label>
+                  <InfoHelpButton
+                    tooltip="Modelos de IA: Tiny y Base son muy rápidos para pruebas; Small y Medium otorgan un gran equilibrio profesional pericial; Large otorga la máxima fidelidad forense."
+                    onClick={() => {
+                      setSeccionAyudaInicial('modelos');
+                      setModalAyudaAbierto(true);
+                    }}
+                  />
+                </div>
+                <span
+                  style={{
+                    fontSize: '0.7rem',
+                    fontWeight: 600,
+                    letterSpacing: '0.03em',
+                    color: modeloDisponibleLocalmente ? THEME_TOKENS.colors.stateSuccess : THEME_TOKENS.colors.stateWarning,
+                    backgroundColor: modeloDisponibleLocalmente ? THEME_TOKENS.colors.stateSuccessBg : THEME_TOKENS.colors.stateWarningBg,
+                    border: `1px solid ${modeloDisponibleLocalmente ? THEME_TOKENS.colors.stateSuccessBorder : THEME_TOKENS.colors.stateWarningBorder}`,
+                    padding: '0.15rem 0.55rem',
+                    borderRadius: THEME_TOKENS.radii.xs,
+                  }}
+                >
+                  {modeloDisponibleLocalmente ? '✓ Disponible' : '⚠️ No descargado'}
+                </span>
+              </div>
+              <HoverTooltip content={`Modelo activo: ${WHISPER_MODELS[model]?.nombreVisible}. ${WHISPER_MODELS[model]?.descripcion}`} maxWidth="340px">
+                <select
+                  value={model}
+                  onChange={handleCambioModelo}
+                  disabled={isRunning}
+                  style={{
+                    width: '100%',
+                    padding: '0.65rem 0.85rem',
+                    borderRadius: THEME_TOKENS.radii.sm,
+                    border: `1px solid ${THEME_TOKENS.colors.borderStrong}`,
+                    fontSize: '0.875rem',
+                    backgroundColor: THEME_TOKENS.colors.surfaceBase,
+                    color: THEME_TOKENS.colors.textPrimary,
+                    fontFamily: THEME_TOKENS.fonts.sans,
+                    outline: 'none',
+                    transition: `border-color ${THEME_TOKENS.transitions.fast}`,
+                  }}
+                  onFocus={(e) => (e.currentTarget.style.borderColor = THEME_TOKENS.colors.borderFocus)}
+                  onBlur={(e) => (e.currentTarget.style.borderColor = THEME_TOKENS.colors.borderStrong)}
+                >
+                  {Object.entries(WHISPER_MODELS).map(([key, cfg]) => (
+                    <option key={key} value={key}>
+                      {cfg.nombreVisible} — Archivo: {cfg.nombreArchivo} ({cfg.tamanoAproximadoMB} MB)
+                    </option>
+                  ))}
+                </select>
+              </HoverTooltip>
+              <span style={{ fontSize: '0.775rem', color: THEME_TOKENS.colors.textSecondary, marginTop: '0.35rem', display: 'block' }}>
+                {WHISPER_MODELS[model]?.descripcion}
               </span>
-            </label>
-          </HoverTooltip>
-        </div>
+            </div>{/* /Paso 2 */}
 
-        {/* 5. Opciones de Salida Documental */}
-        <div style={{ marginBottom: '2rem', paddingTop: '0.5rem', borderTop: `1px solid ${THEME_TOKENS.colors.borderSubtle}` }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', margin: '0.85rem 0 0.6rem 0' }}>
-            <strong style={{ color: THEME_TOKENS.colors.textPrimary, fontSize: '0.875rem' }}>
-              5. Formatos y actas de salida requeridas:
-            </strong>
-            <InfoHelpButton
-              tooltip="Selecciona qué actas deseas emitir. Cada archivo generado preservará exactamente el nombre de tu archivo de origen cambiando solo la extensión."
-              onClick={() => {
-                setSeccionAyudaInicial('formatos');
-                setModalAyudaAbierto(true);
+          </div>{/* /COLUMNA IZQUIERDA */}
+
+          {/* ═══ COLUMNA DERECHA: Pasos 3, 4 (diarización prominente) y 5 ════════ */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1.75rem' }}>
+
+            {/* 3. Selector de Idioma */}
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
+                <label style={{ fontWeight: 600, color: THEME_TOKENS.colors.textPrimary, fontSize: '0.875rem' }}>
+                  3. Idioma del registro sonoro
+                </label>
+                <InfoHelpButton
+                  tooltip="Permite que el modelo detecte automáticamente el idioma o fija Español/Inglés para máxima precisión y evitar traducciones involuntarias."
+                />
+              </div>
+              <HoverTooltip content="Configura el idioma de transcripción: detección automática o forzado en un idioma específico" maxWidth="320px">
+                <select
+                  value={language}
+                  onChange={(e) => {
+                    const nuevoIdioma = e.target.value as LanguageOption;
+                    setLanguage(nuevoIdioma);
+                    UserSettingsService.guardarConfiguracion({ idioma: nuevoIdioma });
+                  }}
+                  disabled={isRunning}
+                  style={{
+                    width: '100%',
+                    padding: '0.65rem 0.85rem',
+                    borderRadius: THEME_TOKENS.radii.sm,
+                    border: `1px solid ${THEME_TOKENS.colors.borderStrong}`,
+                    fontSize: '0.875rem',
+                    backgroundColor: THEME_TOKENS.colors.surfaceBase,
+                    color: THEME_TOKENS.colors.textPrimary,
+                    fontFamily: THEME_TOKENS.fonts.sans,
+                    outline: 'none',
+                  }}
+                  onFocus={(e) => (e.currentTarget.style.borderColor = THEME_TOKENS.colors.borderFocus)}
+                  onBlur={(e) => (e.currentTarget.style.borderColor = THEME_TOKENS.colors.borderStrong)}
+                >
+                  <option value="auto">🌐 Detección automática de idioma</option>
+                  <option value="es">Español (Castellano)</option>
+                  <option value="en">Inglés (English)</option>
+                  <option value="fr">Francés (Français)</option>
+                  <option value="de">Alemán (Deutsch)</option>
+                  <option value="it">Italiano (Italiano)</option>
+                  <option value="pt">Portugués (Português)</option>
+                  <option value="zh">Chino (Mandarin)</option>
+                </select>
+              </HoverTooltip>
+            </div>{/* /Paso 3 */}
+
+            {/* 4. Diarización — control prominente y alternante (por defecto activo) */}
+            <div
+              style={{
+                backgroundColor: diarizarHablantes ? THEME_TOKENS.colors.stateSuccessBg : THEME_TOKENS.colors.bgSecondary,
+                border: `1px solid ${diarizarHablantes ? THEME_TOKENS.colors.stateSuccessBorder : THEME_TOKENS.colors.borderStrong}`,
+                borderRadius: THEME_TOKENS.radii.md,
+                padding: '1rem 1.1rem',
+                transition: `all ${THEME_TOKENS.transitions.fast}`,
               }}
-            />
-          </div>
-          <div className="output-formats-group">
-            <HoverTooltip content="Genera acta de transcripción literal (.txt) estructurada con encabezados, metadatos y turnos por interlocutor">
-              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', fontSize: '0.85rem', color: THEME_TOKENS.colors.textPrimary }}>
-                <input
-                  type="checkbox"
-                  checked={outputTxt}
-                  onChange={(e) => {
-                    setOutputTxt(e.target.checked);
-                    UserSettingsService.guardarConfiguracion({ outputTxt: e.target.checked });
-                  }}
-                  disabled={isRunning}
-                  style={{ accentColor: THEME_TOKENS.colors.surfaceDark }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.65rem' }}>
+                <label style={{ fontWeight: 700, color: THEME_TOKENS.colors.textPrimary, fontSize: '0.875rem' }}>
+                  4. Identificación de hablantes (Diarización)
+                </label>
+                <InfoHelpButton
+                  tooltip="Activa la separación e identificación de interlocutores (Persona 1, Persona 2, etc.) mediante pyannote.audio y análisis espectral. Si se desactiva, se realiza una transcripción continua de alta velocidad sin segmentar por hablantes."
                 />
-                <span>Transcripción literal (<code>.txt</code>)</span>
-              </label>
-            </HoverTooltip>
-
-            <HoverTooltip content="Genera subtítulos periciales (.srt) con marcas de tiempo canónicas compatibles con reproductores de video">
-              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', fontSize: '0.85rem', color: THEME_TOKENS.colors.textPrimary }}>
-                <input
-                  type="checkbox"
-                  checked={outputSrt}
-                  onChange={(e) => {
-                    setOutputSrt(e.target.checked);
-                    UserSettingsService.guardarConfiguracion({ outputSrt: e.target.checked });
+              </div>
+              {/* Toggle switch visual pill */}
+              <HoverTooltip content="Activa o desactiva la diarización. Al desactivarla, se genera una transcripción continua sin discriminación de hablantes." maxWidth="350px">
+                <label
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.85rem',
+                    cursor: isRunning ? 'not-allowed' : 'pointer',
+                    userSelect: 'none',
                   }}
-                  disabled={isRunning}
-                  style={{ accentColor: THEME_TOKENS.colors.surfaceDark }}
-                />
-                <span>Subtítulos temporizados periciales (<code>.srt</code>)</span>
-              </label>
-            </HoverTooltip>
+                >
+                  {/* Pista del toggle */}
+                  <span style={{ position: 'relative', display: 'inline-block', width: '44px', height: '24px', flexShrink: 0 }}>
+                    <input
+                      type="checkbox"
+                      checked={diarizarHablantes}
+                      onChange={(e) => {
+                        setDiarizarHablantes(e.target.checked);
+                        UserSettingsService.guardarConfiguracion({ diarizarHablantes: e.target.checked });
+                      }}
+                      disabled={isRunning}
+                      style={{ opacity: 0, width: 0, height: 0, position: 'absolute' }}
+                    />
+                    <span
+                      style={{
+                        position: 'absolute',
+                        inset: 0,
+                        borderRadius: '12px',
+                        backgroundColor: diarizarHablantes ? THEME_TOKENS.colors.stateSuccess : THEME_TOKENS.colors.borderStrong,
+                        transition: `background-color ${THEME_TOKENS.transitions.fast}`,
+                        cursor: isRunning ? 'not-allowed' : 'pointer',
+                      }}
+                    />
+                    <span
+                      style={{
+                        position: 'absolute',
+                        top: '3px',
+                        left: diarizarHablantes ? '23px' : '3px',
+                        width: '18px',
+                        height: '18px',
+                        borderRadius: '50%',
+                        backgroundColor: THEME_TOKENS.colors.surfaceBase,
+                        boxShadow: THEME_TOKENS.shadows.sm,
+                        transition: `left ${THEME_TOKENS.transitions.fast}`,
+                        pointerEvents: 'none',
+                      }}
+                    />
+                  </span>
+                  {/* Etiqueta descriptiva */}
+                  <span>
+                    <strong style={{ fontSize: '0.875rem', color: THEME_TOKENS.colors.textPrimary }}>
+                      {diarizarHablantes ? '👥 Diarización activa' : '📄 Transcripción continua'}
+                    </strong>
+                    <span style={{ display: 'block', fontSize: '0.775rem', color: THEME_TOKENS.colors.textSecondary, marginTop: '0.15rem' }}>
+                      {diarizarHablantes
+                        ? 'Identificación y separación de interlocutores activada'
+                        : 'Sin diarización ni separación de voces'}
+                    </span>
+                  </span>
+                </label>
+              </HoverTooltip>
+            </div>{/* /Paso 4 */}
 
-            <HoverTooltip content="Conserva o genera el archivo de video procesado (.mp4) con su meta-imagen">
-              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', fontSize: '0.85rem', color: THEME_TOKENS.colors.textPrimary }}>
-                <input
-                  type="checkbox"
-                  checked={outputVideo}
-                  onChange={(e) => {
-                    setOutputVideo(e.target.checked);
-                    UserSettingsService.guardarConfiguracion({ outputVideo: e.target.checked });
+            {/* 5. Opciones de Salida Documental */}
+            <div style={{ paddingTop: '0.5rem', borderTop: `1px solid ${THEME_TOKENS.colors.borderSubtle}` }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', margin: '0.85rem 0 0.6rem 0' }}>
+                <strong style={{ color: THEME_TOKENS.colors.textPrimary, fontSize: '0.875rem' }}>
+                  5. Formatos y actas de salida requeridas:
+                </strong>
+                <InfoHelpButton
+                  tooltip="Selecciona qué actas deseas emitir. Cada archivo generado preservará exactamente el nombre de tu archivo de origen cambiando solo la extensión."
+                  onClick={() => {
+                    setSeccionAyudaInicial('formatos');
+                    setModalAyudaAbierto(true);
                   }}
-                  disabled={isRunning}
-                  style={{ accentColor: THEME_TOKENS.colors.surfaceDark }}
                 />
-                <span>Video generado con meta‑imagen (<code>.mp4</code>)</span>
-              </label>
-            </HoverTooltip>
-          </div>
-        </div>
+              </div>
+              <div className="output-formats-group">
+                <HoverTooltip content="Genera acta de transcripción literal (.txt) estructurada con encabezados, metadatos y turnos por interlocutor">
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', fontSize: '0.85rem', color: THEME_TOKENS.colors.textPrimary }}>
+                    <input
+                      type="checkbox"
+                      checked={outputTxt}
+                      onChange={(e) => {
+                        setOutputTxt(e.target.checked);
+                        UserSettingsService.guardarConfiguracion({ outputTxt: e.target.checked });
+                      }}
+                      disabled={isRunning}
+                      style={{ accentColor: THEME_TOKENS.colors.surfaceDark }}
+                    />
+                    <span>Transcripción literal (<code>.txt</code>)</span>
+                  </label>
+                </HoverTooltip>
 
-        {/* Botón de Acción Principal Centrado (Mobile First) */}
-        <div className="btn-primary-container" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+                <HoverTooltip content="Genera subtítulos periciales (.srt) con marcas de tiempo canónicas compatibles con reproductores de video">
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', fontSize: '0.85rem', color: THEME_TOKENS.colors.textPrimary }}>
+                    <input
+                      type="checkbox"
+                      checked={outputSrt}
+                      onChange={(e) => {
+                        setOutputSrt(e.target.checked);
+                        UserSettingsService.guardarConfiguracion({ outputSrt: e.target.checked });
+                      }}
+                      disabled={isRunning}
+                      style={{ accentColor: THEME_TOKENS.colors.surfaceDark }}
+                    />
+                    <span>Subtítulos temporizados periciales (<code>.srt</code>)</span>
+                  </label>
+                </HoverTooltip>
+
+                <HoverTooltip content="Conserva o genera el archivo de video procesado (.mp4) con su meta-imagen">
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', fontSize: '0.85rem', color: THEME_TOKENS.colors.textPrimary }}>
+                    <input
+                      type="checkbox"
+                      checked={outputVideo}
+                      onChange={(e) => {
+                        setOutputVideo(e.target.checked);
+                        UserSettingsService.guardarConfiguracion({ outputVideo: e.target.checked });
+                      }}
+                      disabled={isRunning}
+                      style={{ accentColor: THEME_TOKENS.colors.surfaceDark }}
+                    />
+                    <span>Video generado con meta‑imagen (<code>.mp4</code>)</span>
+                  </label>
+                </HoverTooltip>
+              </div>
+            </div>{/* /Paso 5 */}
+
+          </div>{/* /COLUMNA DERECHA */}
+
+        </div>{/* /Contenedor Principal dos columnas */}
+
+        {/* ── Fila de acción: Iniciar Transcripción + Apoyar Desarrollo ─────────── */}
+        <div
+          className="btn-primary-container"
+          style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.75rem', flexWrap: 'wrap' }}
+        >
           <HoverTooltip content={isRunning ? 'Procesando archivos...' : 'Inicia la decodificación acústica, VAD, identificación de hablantes y generación de archivos'}>
             <button
               onClick={startTranscription}
@@ -1353,6 +1425,7 @@ export default function TranscriptionPanel(): React.ReactElement {
               {isRunning ? '⏳ Procesando transcripción...' : '▶ Iniciar Transcripción'}
             </button>
           </HoverTooltip>
+          <DonateButton />
         </div>
 
         {/* Mensaje de estado y barra de progreso */}
