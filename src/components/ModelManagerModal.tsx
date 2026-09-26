@@ -10,7 +10,7 @@ import { listen } from '@tauri-apps/api/event';
 import { ModelStorageServiceFactory } from '../services/models/modelStorageService';
 import { ProgresoRelocalizacion, ResultadoRelocalizacion } from '../services/models/modelStorageTypes';
 
-const obtenerTauriInvoke = () => {
+const obtenerTauriInvoke = (): (<T = any>(cmd: string, args?: Record<string, any>) => Promise<T>) => {
   if (typeof window !== 'undefined' && (window as any).__TAURI__?.invoke) {
     return (window as any).__TAURI__.invoke;
   }
@@ -1922,7 +1922,7 @@ class ModelManagerErrorBoundary extends Component<ErrorBoundaryProps, ErrorBound
           <div
             style={{
               backgroundColor: THEME_TOKENS.colors.surfaceBase,
-              border: `1px solid ${THEME_TOKENS.colors.stateDangerBorder}`,
+              border: `1px solid ${THEME_TOKENS.colors.stateErrorBorder}`,
               borderRadius: THEME_TOKENS.radii.lg,
               padding: '2rem',
               maxWidth: '520px',
@@ -1947,7 +1947,7 @@ class ModelManagerErrorBoundary extends Component<ErrorBoundaryProps, ErrorBound
                   this.setState({ hasError: false });
                 }}
                 style={{
-                  backgroundColor: THEME_TOKENS.colors.brandPrimary,
+                  backgroundColor: THEME_TOKENS.colors.accentPrimary,
                   color: '#fff',
                   border: 'none',
                   padding: '0.5rem 1.25rem',

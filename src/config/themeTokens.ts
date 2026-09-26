@@ -28,6 +28,7 @@ export const THEME_TOKENS = {
     accentHover: '#383733',
     accentDark: '#1C1C1A',
     accentGold: '#92400e',
+    accentNavy: '#1E3A8A',
     accentTaupe: '#B5A795',
     accentTaupeBg: '#F7F5F0',
 

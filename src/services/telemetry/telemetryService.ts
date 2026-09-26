@@ -53,8 +53,9 @@ export class TelemetryService implements ITelemetryService {
 
     // Cálculo de ETA
     let etaCalculado = 0;
-    if (datosExtra?.tiempoEstimadoSegundos && datosExtra.tiempoEstimadoSegundos > 0) {
-      etaCalculado = datosExtra.tiempoEstimadoSegundos;
+    const tiempoEstimadoEntrada = datosExtra?.tiempoEstimadoSegundos ?? datosExtra?.tiempoRestanteSegundos;
+    if (tiempoEstimadoEntrada && tiempoEstimadoEntrada > 0) {
+      etaCalculado = tiempoEstimadoEntrada;
     } else if (pctClamped > 5 && pctClamped < 100) {
       const tiempoTotalEstimado = (transcurridoSeg / (pctClamped / 100));
       etaCalculado = Math.max(0, tiempoTotalEstimado - transcurridoSeg);
@@ -82,6 +83,7 @@ export class TelemetryService implements ITelemetryService {
       mensaje: this.ultimoMensaje,
       tiempoTranscurridoSegundos: Math.round(transcurridoSeg),
       tiempoRestanteSegundos: Math.round(this.etaSuavizadoSegundos),
+      tiempoEstimadoSegundos: Math.round(this.etaSuavizadoSegundos),
       velocidadFactor: this.factorVelocidad || 1.0,
       segundosProcesadosAudio: datosExtra?.segundosProcesadosAudio || 0,
       totalSegundosAudio: this.duracionAudioTotalSeg,

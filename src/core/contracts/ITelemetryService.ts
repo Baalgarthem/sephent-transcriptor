@@ -12,6 +12,7 @@ export interface MetricasProgresoTemporal {
   mensaje: string;
   tiempoTranscurridoSegundos: number;
   tiempoRestanteSegundos: number;
+  tiempoEstimadoSegundos?: number;
   velocidadFactor: number;
   segundosProcesadosAudio: number;
   totalSegundosAudio: number;

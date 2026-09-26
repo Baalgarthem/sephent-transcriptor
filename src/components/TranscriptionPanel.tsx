@@ -19,6 +19,8 @@ import { AudioTranscriptionEngine } from '../services/transcription/audioTranscr
 import { WhisperBridgeService } from '../services/transcription/whisperBridgeService';
 import { InfoHelpButton, HoverTooltip } from './common/Tooltip';
 import { HelpModal } from './HelpModal';
+import { TranscriptionHistorySection } from './history/TranscriptionHistorySection';
+import { DangerZoneSection } from './danger/DangerZoneSection';
 import { useService } from '../core/di/DIContext';
 import { DI_TOKENS } from '../core/di/tokens';
 import { ITranscriptionEngine, TelemetriaTranscripcion } from '../core/contracts/ITranscriptionEngine';
@@ -79,7 +81,34 @@ export default function TranscriptionPanel(): React.ReactElement {
   const [modoDestino, setModoDestino] = useState<ModoDestinoSalida>(configInicial.modoDestino);
   const [historialBD, setHistorialBD] = useState<StoredTranscription[]>(() => TranscriptionDatabase.obtenerTodas());
   const [mostrarHistorialBD, setMostrarHistorialBD] = useState(false);
-  const [transcripcionesSeleccionadas, setTranscripcionesSeleccionadas] = useState<Set<string>>(new Set());
+
+  // Gestión segura de URLs temporales en memoria para prevenir fugas
+  const objectUrlsRef = useRef<Set<string>>(new Set());
+
+  const crearObjectUrlSeguro = (blob: Blob): string => {
+    try {
+      const url = URL.createObjectURL(blob);
+      objectUrlsRef.current.add(url);
+      return url;
+    } catch {
+      return '';
+    }
+  };
+
+  const revocarObjectUrls = () => {
+    objectUrlsRef.current.forEach((url) => {
+      try {
+        URL.revokeObjectURL(url);
+      } catch {}
+    });
+    objectUrlsRef.current.clear();
+  };
+
+  useEffect(() => {
+    return () => {
+      revocarObjectUrls();
+    };
+  }, []);
 
   // Estados de modales y flujo pericial
   const [modalModelosAbierto, setModalModelosAbierto] = useState(false);
@@ -101,32 +130,6 @@ export default function TranscriptionPanel(): React.ReactElement {
     }
   });
   const [modeloParaDescargaDirecta, setModeloParaDescargaDirecta] = useState<string | undefined>(undefined);
-
-  const handleToggleSeleccionTrx = (id: string) => {
-    setTranscripcionesSeleccionadas((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
-
-  const handleCombinarTranscripcionesSeleccionadas = () => {
-    const ids = Array.from(transcripcionesSeleccionadas);
-    if (ids.length !== 2) {
-      alert('Por favor selecciona exactamente dos transcripciones para combinarlas en una sola.');
-      return;
-    }
-
-    const combinada = TranscriptionDatabase.combinarDosTranscripciones(ids[0], ids[1]);
-    if (combinada) {
-      setHistorialBD(TranscriptionDatabase.obtenerTodas());
-      setTranscripcionesSeleccionadas(new Set());
-      alert(`¡Transcripciones combinadas exitosamente!\n\nSe ha consolidado una nueva transcripción:\n"${combinada.fileName}"\n(Folio: ${combinada.id})`);
-    } else {
-      alert('No se pudieron combinar las transcripciones seleccionadas.');
-    }
-  };
 
   const handleAbrirRevisor = (
     nombreArchivo?: string,
@@ -372,105 +375,18 @@ export default function TranscriptionPanel(): React.ReactElement {
   };
 
 
-  // Estado para la zona de peligro configurable
-  const [zonaPeligroAbierta, setZonaPeligroAbierta] = useState(false);
-  const [zonaPeligroFase, setZonaPeligroFase] = useState<0 | 1>(0); // 0=configuración, 1=confirmación por texto
-  const [textoConfirmacionPeligro, setTextoConfirmacionPeligro] = useState('');
-  const [opcionesPeligro, setOpcionesPeligro] = useState({
-    transcripciones: true,
-    expedientes: true,
-    grupos: true,
-    modelos: false, // Por defecto FALSE para conservar y no perder los modelos Whisper
-    configuracion: false,
-  });
-
-  const handleIniciarBorradoTotal = () => {
-    if (
-      !opcionesPeligro.transcripciones &&
-      !opcionesPeligro.expedientes &&
-      !opcionesPeligro.grupos &&
-      !opcionesPeligro.modelos &&
-      !opcionesPeligro.configuracion
-    ) {
-      alert('Por favor selecciona al menos un elemento que deseas depurar.');
-      return;
-    }
-    setTextoConfirmacionPeligro('');
-    setZonaPeligroFase(1);
-  };
-
-  const handleConfirmarBorradoFinal = async () => {
-    const palabra = textoConfirmacionPeligro.trim().toUpperCase();
-    if (palabra !== 'ELIMINAR' && palabra !== 'ELIMINAR TODO') return;
-
-    const eliminados: string[] = [];
-    const conservados: string[] = [];
-
-    if (opcionesPeligro.transcripciones) {
-      TranscriptionDatabase.limpiarTodo();
-      setHistorialBD([]);
-      setTranscriptionRecords([]);
-      eliminados.push('Historial de transcripciones');
-    } else {
-      conservados.push('Historial de transcripciones');
-    }
-
-    if (opcionesPeligro.expedientes) {
-      ReviewerDatabase.limpiarTodo();
-      eliminados.push('Expedientes periciales y notas');
-    } else {
-      conservados.push('Expedientes periciales');
-    }
-
-    if (opcionesPeligro.grupos) {
-      TranscriptionGroupService.limpiarTodo();
-      eliminados.push('Grupos de expedientes');
-    } else {
-      conservados.push('Grupos de expedientes');
-    }
-
-    if (opcionesPeligro.modelos) {
-      ModelManager.limpiarModelosRegistrados();
-      eliminados.push('Modelos OpenAI Whisper (registro restablecido)');
-    } else {
-      conservados.push('Modelos OpenAI Whisper (conservados intactos)');
-    }
-
-    if (opcionesPeligro.configuracion) {
-      UserSettingsService.guardarConfiguracion({
-        modelo: 'medium',
-        idioma: 'es',
-        outputTxt: true,
-        outputSrt: true,
-        outputVideo: false,
-        modoDestino: 'default',
-      });
-      eliminados.push('Preferencias de usuario');
-    }
-
-    setZonaPeligroFase(0);
-    setZonaPeligroAbierta(false);
-    setTextoConfirmacionPeligro('');
+  // Callback invocado tras ejecución de limpieza desde DangerZoneSection
+  const handleLimpiezaCompleta = async () => {
+    setHistorialBD([]);
+    setTranscriptionRecords([]);
     setStatusMessage('');
     setProgress(0);
-
-    // Re-sincronizar inmediatamente con la carpeta oficial para validar modelos que persistan en disco
     await ModelManager.sincronizarModelosEnRutaOficial();
     const activo = ModelManager.resolverModeloPorDefecto() as ModelKey;
     setModel(activo);
     actualizarEstadoModelo(activo);
-
-    alert(
-      `✓ Limpieza completada con éxito.\n\n` +
-      `Elementos eliminados:\n• ${eliminados.join('\n• ') || 'Ninguno'}\n\n` +
-      `Elementos conservados:\n• ${conservados.join('\n• ')}`
-    );
   };
 
-  const handleCancelarPeligro = () => {
-    setZonaPeligroFase(0);
-    setTextoConfirmacionPeligro('');
-  };
 
   const handleLimpiarHistorialBD = async () => {
     if (confirm('¿Desea vaciar el historial de transcripciones y expedientes?\n\nTus modelos de OpenAI Whisper se mantendrán intactos.')) {
@@ -611,11 +527,11 @@ export default function TranscriptionPanel(): React.ReactElement {
 
         let audioBlobUrl: string | undefined = undefined;
         try {
-          if (typeof URL !== 'undefined' && URL.createObjectURL && file instanceof Blob) {
-            audioBlobUrl = URL.createObjectURL(file);
+          if (file instanceof Blob) {
+            audioBlobUrl = crearObjectUrlSeguro(file);
           }
         } catch {
-          // Ignorar si no está disponible URL.createObjectURL en el entorno
+          // Ignorar si no está disponible en el entorno
         }
 
         // Procesamiento acústico real desacoplado con Inyección de Dependencias
@@ -1647,729 +1563,21 @@ export default function TranscriptionPanel(): React.ReactElement {
         )}
       </div>
 
-      {/* Sección de Base de Datos de Transcripciones Realizadas */}
+      {/* Sección de Base de Datos de Transcripciones Realizadas (Componente Modular SRP) */}
       {mostrarHistorialBD && (
-        <div
-          style={{
-            marginTop: '1.5rem',
-            backgroundColor: THEME_TOKENS.colors.surfaceBase,
-            border: `1px solid ${THEME_TOKENS.colors.borderDark}`,
-            borderRadius: THEME_TOKENS.radii.md,
-            padding: '1.5rem',
-            boxShadow: THEME_TOKENS.shadows.md,
-          }}
-        >
-          <div
-            style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              marginBottom: '1rem',
-              borderBottom: `1px solid ${THEME_TOKENS.colors.borderSubtle}`,
-              paddingBottom: '0.65rem',
-              flexWrap: 'wrap',
-              gap: '0.5rem',
-            }}
-          >
-            <div>
-              <h3
-                style={{
-                  margin: 0,
-                  fontSize: '1.1rem',
-                  fontFamily: THEME_TOKENS.fonts.serif,
-                  fontWeight: 600,
-                  color: THEME_TOKENS.colors.textPrimary,
-                }}
-              >
-                🗄️ Base de Datos de Transcripciones Realizadas
-              </h3>
-              <span style={{ fontSize: '0.775rem', color: THEME_TOKENS.colors.textMuted }}>
-                Registro histórico local persistente de expedientes procesados y sus rutas de guardado
-              </span>
-            </div>
-
-            <div style={{ display: 'flex', gap: '0.65rem', alignItems: 'center' }}>
-              {historialBD.length > 0 && (
-                <button
-                  onClick={handleLimpiarHistorialBD}
-                  style={{
-                    backgroundColor: 'transparent',
-                    border: `1px solid ${THEME_TOKENS.colors.stateErrorBorder}`,
-                    color: THEME_TOKENS.colors.stateError,
-                    padding: '0.25rem 0.65rem',
-                    fontSize: '0.75rem',
-                    borderRadius: THEME_TOKENS.radii.xs,
-                    cursor: 'pointer',
-                    fontWeight: 500,
-                  }}
-                >
-                  Vaciar base de datos
-                </button>
-              )}
-              <button
-                onClick={() => setMostrarHistorialBD(false)}
-                title="Cerrar vista de base de datos"
-                style={{
-                  backgroundColor: 'transparent',
-                  border: 'none',
-                  fontSize: '1.25rem',
-                  lineHeight: 1,
-                  cursor: 'pointer',
-                  color: THEME_TOKENS.colors.textMuted,
-                  padding: '0.25rem',
-                }}
-              >
-                &times;
-              </button>
-            </div>
-          </div>
-
-          {historialBD.length === 0 ? (
-            <p
-              style={{
-                margin: 0,
-                fontSize: '0.85rem',
-                color: THEME_TOKENS.colors.textMuted,
-                fontStyle: 'italic',
-                textAlign: 'center',
-                padding: '2rem 1rem',
-              }}
-            >
-              No hay transcripciones registradas aún en la base de datos local.
-            </p>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-              {transcripcionesSeleccionadas.size > 0 && (
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    backgroundColor: '#F0F4EC',
-                    border: '1px solid #C8D8B8',
-                    padding: '0.6rem 1rem',
-                    borderRadius: THEME_TOKENS.radii.xs,
-                    gap: '0.75rem',
-                    flexWrap: 'wrap',
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                    <span style={{ fontSize: '1rem' }}>🔗</span>
-                    <span style={{ fontSize: '0.8125rem', fontWeight: 600, color: '#2E4720' }}>
-                      {transcripcionesSeleccionadas.size === 2
-                        ? '2 transcripciones seleccionadas para combinar'
-                        : `${transcripcionesSeleccionadas.size} seleccionada(s) (selecciona exactamente 2 para combinar)`}
-                    </span>
-                  </div>
-                  <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                    {transcripcionesSeleccionadas.size === 2 && (
-                      <button
-                        type="button"
-                        onClick={handleCombinarTranscripcionesSeleccionadas}
-                        style={{
-                          backgroundColor: '#4E6A3B',
-                          color: '#FFFFFF',
-                          border: 'none',
-                          padding: '0.35rem 0.75rem',
-                          borderRadius: THEME_TOKENS.radii.xs,
-                          fontSize: '0.8rem',
-                          fontWeight: 600,
-                          cursor: 'pointer',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '0.35rem',
-                        }}
-                      >
-                        🧩 Combinar en una sola transcripción (1 clic)
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => setTranscripcionesSeleccionadas(new Set())}
-                      style={{
-                        backgroundColor: 'transparent',
-                        color: THEME_TOKENS.colors.textSecondary,
-                        border: `1px solid ${THEME_TOKENS.colors.borderSubtle}`,
-                        padding: '0.3rem 0.6rem',
-                        borderRadius: THEME_TOKENS.radii.xs,
-                        fontSize: '0.75rem',
-                        cursor: 'pointer',
-                      }}
-                    >
-                      Desmarcar
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {historialBD.map((item) => (
-                <div
-                  key={item.id}
-                  style={{
-                    padding: '0.85rem 1rem',
-                    backgroundColor: transcripcionesSeleccionadas.has(item.id) ? '#F5F7F2' : THEME_TOKENS.colors.bgCanvas,
-                    border: transcripcionesSeleccionadas.has(item.id) ? '2px solid #5C6B50' : `1px solid ${THEME_TOKENS.colors.borderSubtle}`,
-                    borderLeft: `4px solid ${transcripcionesSeleccionadas.has(item.id) ? '#4E6A3B' : THEME_TOKENS.colors.accentTaupe}`,
-                    borderRadius: THEME_TOKENS.radii.xs,
-                    transition: 'all 0.15s ease',
-                  }}
-                >
-                  <div
-                    style={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'flex-start',
-                      flexWrap: 'wrap',
-                      gap: '0.5rem',
-                    }}
-                  >
-                    <div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-                        <label
-                          style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '0.3rem',
-                            cursor: 'pointer',
-                            marginRight: '0.25rem',
-                            backgroundColor: transcripcionesSeleccionadas.has(item.id) ? '#E2EBD8' : THEME_TOKENS.colors.surfaceBase,
-                            padding: '0.15rem 0.4rem',
-                            borderRadius: THEME_TOKENS.radii.xs,
-                            border: `1px solid ${THEME_TOKENS.colors.borderSubtle}`,
-                          }}
-                          title="Seleccionar para combinar con otra transcripción"
-                        >
-                          <input
-                            type="checkbox"
-                            checked={transcripcionesSeleccionadas.has(item.id)}
-                            onChange={() => handleToggleSeleccionTrx(item.id)}
-                            style={{ cursor: 'pointer', width: '14px', height: '14px' }}
-                          />
-                          <span style={{ fontSize: '0.7rem', fontWeight: 600, color: THEME_TOKENS.colors.textPrimary }}>
-                            {transcripcionesSeleccionadas.has(item.id) ? 'Seleccionada' : 'Seleccionar'}
-                          </span>
-                        </label>
-                        <span className={item.fileType === 'video' ? 'file-badge-video' : 'file-badge-audio'}>
-                          {item.fileType === 'video' ? '🎬 Video' : '🎵 Audio'}
-                        </span>
-                        <strong style={{ fontSize: '0.875rem', color: THEME_TOKENS.colors.textPrimary }}>
-                          {item.fileName}
-                        </strong>
-                        <span style={{ fontSize: '0.75rem', color: THEME_TOKENS.colors.textMuted }}>
-                          ({item.fileSizeFormatted})
-                        </span>
-                        <span
-                          style={{
-                            fontSize: '0.6875rem',
-                            fontFamily: THEME_TOKENS.fonts.mono,
-                            backgroundColor: THEME_TOKENS.colors.bgSecondary,
-                            padding: '0.1rem 0.4rem',
-                            borderRadius: THEME_TOKENS.radii.xs,
-                            color: THEME_TOKENS.colors.textSecondary,
-                          }}
-                        >
-                          Folio: {item.id}
-                        </span>
-
-                        {item.revisado ? (
-                          <span
-                            style={{
-                              fontSize: '0.6875rem',
-                              backgroundColor: '#EBF7EE',
-                              color: '#216334',
-                              border: '1px solid #B7EB8F',
-                              padding: '0.1rem 0.45rem',
-                              borderRadius: THEME_TOKENS.radii.xs,
-                              fontWeight: 600,
-                            }}
-                          >
-                            ✓ Revisada
-                          </span>
-                        ) : (
-                          <span
-                            style={{
-                              fontSize: '0.6875rem',
-                              backgroundColor: '#FFF9EB',
-                              color: '#8A6100',
-                              border: '1px solid #FFE58F',
-                              padding: '0.1rem 0.45rem',
-                              borderRadius: THEME_TOKENS.radii.xs,
-                              fontWeight: 600,
-                            }}
-                          >
-                            ⚠️ Sin revisar
-                          </span>
-                        )}
-                      </div>
-                      <div style={{ fontSize: '0.75rem', color: THEME_TOKENS.colors.textSecondary, marginTop: '0.3rem' }}>
-                        Modelo: <strong>{item.modelUsed}</strong> &middot; Idioma: <strong>{item.language}</strong> &middot; Fecha: {item.date}
-                      </div>
-                      <div
-                        style={{
-                          fontSize: '0.75rem',
-                          color: THEME_TOKENS.colors.textMuted,
-                          marginTop: '0.2rem',
-                          fontFamily: THEME_TOKENS.fonts.mono,
-                          wordBreak: 'break-all',
-                        }}
-                      >
-                        Carpeta destino: {item.destinationFolder}
-                      </div>
-
-                      {item.speakerNames && Object.keys(item.speakerNames).length > 0 && (
-                        <div style={{ marginTop: '0.35rem', display: 'flex', alignItems: 'center', gap: '0.35rem', flexWrap: 'wrap' }}>
-                          <span style={{ fontSize: '0.725rem', color: THEME_TOKENS.colors.textSecondary, fontWeight: 600 }}>
-                            👥 Hablantes identificados:
-                          </span>
-                          {Object.entries(item.speakerNames).map(([spkId, name]) => (
-                            <span
-                              key={spkId}
-                              style={{
-                                fontSize: '0.7rem',
-                                backgroundColor: THEME_TOKENS.colors.surfaceBase,
-                                border: `1px solid ${THEME_TOKENS.colors.borderSubtle}`,
-                                padding: '0.1rem 0.45rem',
-                                borderRadius: '10px',
-                                color: THEME_TOKENS.colors.textPrimary,
-                                fontWeight: 500,
-                              }}
-                            >
-                              {name}
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', flexWrap: 'wrap' }}>
-                      <button
-                        onClick={() => handleAbrirRevisor(item.fileName, item.id, item.audioBlobUrl, item.rawSegments)}
-                        style={{
-                          backgroundColor: THEME_TOKENS.colors.surfaceDark,
-                          color: THEME_TOKENS.colors.textOnDark,
-                          border: 'none',
-                          padding: '0.35rem 0.75rem',
-                          borderRadius: THEME_TOKENS.radii.xs,
-                          fontSize: '0.75rem',
-                          cursor: 'pointer',
-                          fontWeight: 600,
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '0.35rem',
-                        }}
-                        title="Identificar personas hablantes, generar hash y validar esta transcripción"
-                      >
-                        👥 Revisar y Validar Hablantes
-                      </button>
-
-                      {/* Botón de Informe Oficial condicionado a revisión pericial */}
-                      <button
-                        onClick={() => handleDescargarInformeDesdePanel(item.id, item.fileName)}
-                        style={{
-                          backgroundColor: item.revisado ? '#1E4620' : 'transparent',
-                          color: item.revisado ? '#ffffff' : THEME_TOKENS.colors.textMuted,
-                          border: `1px solid ${item.revisado ? '#1E4620' : THEME_TOKENS.colors.borderDark}`,
-                          padding: '0.35rem 0.75rem',
-                          borderRadius: THEME_TOKENS.radii.xs,
-                          fontSize: '0.75rem',
-                          cursor: 'pointer',
-                          fontWeight: 600,
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '0.35rem',
-                        }}
-                        title={
-                          item.revisado
-                            ? 'Descargar Informe Oficial de Transcripción y Acta Pericial'
-                            : '🔒 Bloqueado: Primero debes revisar y validar los hablantes en esta transcripción.'
-                        }
-                      >
-                        <span>{item.revisado ? '📑' : '🔒'}</span>
-                        <span>{item.revisado ? 'Descargar Informe' : 'Informe Bloqueado'}</span>
-                      </button>
-
-                      <button
-                        onClick={() => handleEliminarRegistroBD(item.id)}
-                        title="Eliminar este expediente de la base de datos"
-                        style={{
-                          background: 'transparent',
-                          border: 'none',
-                          color: THEME_TOKENS.colors.textMuted,
-                          cursor: 'pointer',
-                          fontSize: '0.9rem',
-                          padding: '0.2rem 0.4rem',
-                        }}
-                      >
-                        🗑️
-                      </button>
-                    </div>
-                  </div>
-
-                  <div style={{ marginTop: '0.6rem', display: 'flex', gap: '0.6rem', flexWrap: 'wrap' }}>
-                    {item.outputs.map((out, outIdx) => {
-                      const contenido = out.format === 'txt' ? item.textContent : item.srtContent;
-                      return (
-                        <button
-                          key={outIdx}
-                          type="button"
-                          onClick={() => {
-                            if (!contenido) return;
-                            const blob = new Blob([contenido], { type: 'text/plain;charset=utf-8' });
-                            const url = URL.createObjectURL(blob);
-                            const a = document.createElement('a');
-                            a.href = url;
-                            a.download = out.fileName;
-                            a.click();
-                            URL.revokeObjectURL(url);
-                          }}
-                          style={{
-                            fontSize: '0.725rem',
-                            padding: '0.2rem 0.55rem',
-                            backgroundColor: THEME_TOKENS.colors.surfaceBase,
-                            border: `1px solid ${THEME_TOKENS.colors.borderSubtle}`,
-                            borderRadius: THEME_TOKENS.radii.xs,
-                            fontFamily: THEME_TOKENS.fonts.mono,
-                            color: THEME_TOKENS.colors.textPrimary,
-                            cursor: 'pointer',
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '0.35rem',
-                            fontWeight: 500,
-                          }}
-                          title={`Descargar archivo ${out.fileName} (Ubicación: ${out.fullPath})`}
-                        >
-                          <span>↓</span>
-                          <span>{out.fileName} ({out.format.toUpperCase()})</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+        <TranscriptionHistorySection
+          historial={historialBD}
+          alCerrar={() => setMostrarHistorialBD(false)}
+          alEliminarRegistro={handleEliminarRegistroBD}
+          alVaciarHistorial={handleLimpiarHistorialBD}
+          alAbrirRevisor={handleAbrirRevisor}
+          alDescargarInforme={handleDescargarInformeDesdePanel}
+          onActualizarHistorial={() => setHistorialBD(TranscriptionDatabase.obtenerTodas())}
+        />
       )}
 
-      {/* ⚠️ Zona de Peligro — Depuración y borrado total de datos */}
-      <div
-        style={{
-          marginTop: '2rem',
-          border: `1px solid ${zonaPeligroAbierta ? '#b91c1c' : THEME_TOKENS.colors.stateErrorBorder}`,
-          borderRadius: THEME_TOKENS.radii.md,
-          overflow: 'hidden',
-          transition: 'border-color 0.2s',
-        }}
-      >
-        {/* Cabecera colapsable */}
-        <button
-          onClick={() => {
-            setZonaPeligroAbierta((v) => !v);
-            if (zonaPeligroAbierta) handleCancelarPeligro();
-          }}
-          style={{
-            width: '100%',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            padding: '0.75rem 1.1rem',
-            backgroundColor: zonaPeligroAbierta ? '#fef2f2' : THEME_TOKENS.colors.surfaceBase,
-            border: 'none',
-            cursor: 'pointer',
-            transition: 'background-color 0.2s',
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <span style={{ fontSize: '1rem' }}>⚠️</span>
-            <strong style={{ fontSize: '0.875rem', color: '#b91c1c', fontFamily: THEME_TOKENS.fonts.sans }}>
-              Zona de Peligro
-            </strong>
-            <span style={{ fontSize: '0.775rem', color: THEME_TOKENS.colors.textMuted }}>
-              — Acciones irreversibles de depuración
-            </span>
-          </div>
-          <span style={{ fontSize: '0.75rem', color: '#b91c1c', fontWeight: 600 }}>
-            {zonaPeligroAbierta ? '▲ Cerrar' : '▼ Expandir'}
-          </span>
-        </button>
-
-        {/* Contenido expandible */}
-        {zonaPeligroAbierta && (
-          <div
-            style={{
-              backgroundColor: '#fef2f2',
-              borderTop: '1px solid #fecaca',
-              padding: '1.25rem 1.1rem',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '1rem',
-            }}
-          >
-            {/* Fase 0: Selector de elementos a eliminar y a conservar */}
-            {zonaPeligroFase === 0 && (
-              <div
-                style={{
-                  backgroundColor: '#fff',
-                  border: '1px solid #fecaca',
-                  borderRadius: THEME_TOKENS.radii.sm,
-                  padding: '1.15rem 1.25rem',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '1rem',
-                }}
-              >
-                <div>
-                  <strong style={{ fontSize: '0.925rem', color: '#991b1b', display: 'block', marginBottom: '0.25rem' }}>
-                    Configuración de Depuración y Limpieza Selectiva
-                  </strong>
-                  <span style={{ fontSize: '0.8rem', color: '#7f1d1d', lineHeight: 1.5 }}>
-                    Selecciona exactamente qué datos deseas eliminar y cuáles prefieres conservar. Puedes limpiar todo el historial documental pero mantener intactos tus modelos descargados de Whisper.
-                  </span>
-                </div>
-
-                {/* Lista de Checkboxes configurables */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem', paddingTop: '0.5rem', borderTop: '1px solid #fee2e2' }}>
-                  <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.65rem', cursor: 'pointer', fontSize: '0.825rem', color: THEME_TOKENS.colors.textPrimary }}>
-                    <input
-                      type="checkbox"
-                      checked={opcionesPeligro.transcripciones}
-                      onChange={(e) => setOpcionesPeligro((prev) => ({ ...prev, transcripciones: e.target.checked }))}
-                      style={{ marginTop: '0.15rem', accentColor: '#dc2626' }}
-                    />
-                    <div>
-                      <strong>Historial de transcripciones</strong> ({historialBD.length} registros)
-                      <span style={{ display: 'block', fontSize: '0.75rem', color: THEME_TOKENS.colors.textSecondary }}>
-                        Elimina todas las actas de texto (.txt) y subtítulos (.srt) almacenadas en la base de datos local.
-                      </span>
-                    </div>
-                  </label>
-
-                  <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.65rem', cursor: 'pointer', fontSize: '0.825rem', color: THEME_TOKENS.colors.textPrimary }}>
-                    <input
-                      type="checkbox"
-                      checked={opcionesPeligro.expedientes}
-                      onChange={(e) => setOpcionesPeligro((prev) => ({ ...prev, expedientes: e.target.checked }))}
-                      style={{ marginTop: '0.15rem', accentColor: '#dc2626' }}
-                    />
-                    <div>
-                      <strong>Expedientes de revisión pericial y notas</strong>
-                      <span style={{ display: 'block', fontSize: '0.75rem', color: THEME_TOKENS.colors.textSecondary }}>
-                        Elimina las modificaciones de hablantes, roles asignados, firmas SHA-256 y notas periciales.
-                      </span>
-                    </div>
-                  </label>
-
-                  <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.65rem', cursor: 'pointer', fontSize: '0.825rem', color: THEME_TOKENS.colors.textPrimary }}>
-                    <input
-                      type="checkbox"
-                      checked={opcionesPeligro.grupos}
-                      onChange={(e) => setOpcionesPeligro((prev) => ({ ...prev, grupos: e.target.checked }))}
-                      style={{ marginTop: '0.15rem', accentColor: '#dc2626' }}
-                    />
-                    <div>
-                      <strong>Grupos y carpetas de expedientes</strong>
-                      <span style={{ display: 'block', fontSize: '0.75rem', color: THEME_TOKENS.colors.textSecondary }}>
-                        Elimina la organización en carpetas y causas judiciales creadas.
-                      </span>
-                    </div>
-                  </label>
-
-                  {/* Opción de Modelos Whisper: Con badge de advertencia amigable */}
-                  <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.65rem', cursor: 'pointer', fontSize: '0.825rem', color: THEME_TOKENS.colors.textPrimary, backgroundColor: opcionesPeligro.modelos ? '#fff1f2' : '#f0fdf4', padding: '0.6rem 0.75rem', borderRadius: THEME_TOKENS.radii.sm, border: `1px solid ${opcionesPeligro.modelos ? '#fecdd3' : '#bbf7d0'}` }}>
-                    <input
-                      type="checkbox"
-                      checked={opcionesPeligro.modelos}
-                      onChange={(e) => setOpcionesPeligro((prev) => ({ ...prev, modelos: e.target.checked }))}
-                      style={{ marginTop: '0.15rem', accentColor: '#dc2626' }}
-                    />
-                    <div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-                        <strong>Modelos OpenAI Whisper</strong>
-                        <span style={{
-                          backgroundColor: opcionesPeligro.modelos ? '#fee2e2' : '#dcfce7',
-                          color: opcionesPeligro.modelos ? '#991b1b' : '#166534',
-                          fontSize: '0.7rem',
-                          fontWeight: 700,
-                          padding: '0.1rem 0.45rem',
-                          borderRadius: '4px',
-                        }}>
-                          {opcionesPeligro.modelos ? '⚠️ SE ELIMINARÁ EL REGISTRO' : '🛡️ CONSERVAR MODELOS (Recomendado)'}
-                        </span>
-                      </div>
-                      <span style={{ display: 'block', fontSize: '0.75rem', color: opcionesPeligro.modelos ? '#991b1b' : '#15803d', marginTop: '0.15rem' }}>
-                        {opcionesPeligro.modelos
-                          ? 'Atención: Se desvincularán los modelos registrados y tendrás que descargarlos o verificarlos nuevamente.'
-                          : 'Tus archivos de modelos descargados (.pt / .bin) se mantendrán a salvo en tu equipo para no tener que descargarlos otra vez.'}
-                      </span>
-                    </div>
-                  </label>
-
-                  <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.65rem', cursor: 'pointer', fontSize: '0.825rem', color: THEME_TOKENS.colors.textPrimary }}>
-                    <input
-                      type="checkbox"
-                      checked={opcionesPeligro.configuracion}
-                      onChange={(e) => setOpcionesPeligro((prev) => ({ ...prev, configuracion: e.target.checked }))}
-                      style={{ marginTop: '0.15rem', accentColor: '#dc2626' }}
-                    />
-                    <div>
-                      <strong>Restablecer ajustes de usuario a valores por defecto</strong>
-                      <span style={{ display: 'block', fontSize: '0.75rem', color: THEME_TOKENS.colors.textSecondary }}>
-                        Restablece el idioma por defecto, formatos de salida seleccionados y modo de destino de salida.
-                      </span>
-                    </div>
-                  </label>
-                </div>
-
-                {/* Resumen dinámico y Botón de acción */}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem', paddingTop: '0.75rem', borderTop: '1px solid #fee2e2' }}>
-                  <div style={{ fontSize: '0.75rem', color: '#7f1d1d' }}>
-                    {!opcionesPeligro.modelos && (
-                      <span style={{ color: '#166534', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
-                        ✓ Tus modelos Whisper permanecerán guardados y listos para usarse.
-                      </span>
-                    )}
-                  </div>
-
-                  <div style={{ display: 'flex', gap: '0.5rem' }}>
-                    <button
-                      onClick={handleIniciarBorradoTotal}
-                      style={{
-                        backgroundColor: '#dc2626',
-                        color: '#ffffff',
-                        border: 'none',
-                        padding: '0.55rem 1.25rem',
-                        borderRadius: THEME_TOKENS.radii.sm,
-                        fontSize: '0.825rem',
-                        fontWeight: 700,
-                        cursor: 'pointer',
-                        whiteSpace: 'nowrap',
-                        boxShadow: THEME_TOKENS.shadows.sm,
-                      }}
-                    >
-                      🗑 Proceder con la depuración seleccionada
-                    </button>
-                    <button
-                      onClick={() => setZonaPeligroAbierta(false)}
-                      style={{
-                        backgroundColor: 'transparent',
-                        border: `1px solid ${THEME_TOKENS.colors.borderStrong}`,
-                        color: THEME_TOKENS.colors.textSecondary,
-                        padding: '0.55rem 0.95rem',
-                        borderRadius: THEME_TOKENS.radii.sm,
-                        fontSize: '0.825rem',
-                        cursor: 'pointer',
-                      }}
-                    >
-                      Cancelar
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Fase 1: confirmación final escribiendo el texto */}
-            {zonaPeligroFase === 1 && (
-              <div
-                style={{
-                  backgroundColor: '#fff',
-                  border: '2px solid #dc2626',
-                  borderRadius: THEME_TOKENS.radii.sm,
-                  padding: '1.25rem',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '0.85rem',
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  <span style={{ fontSize: '1.25rem' }}>🛑</span>
-                  <strong style={{ fontSize: '0.95rem', color: '#991b1b' }}>
-                    Confirmación de depuración selectiva
-                  </strong>
-                </div>
-
-                <div style={{ backgroundColor: '#fef2f2', padding: '0.75rem', borderRadius: THEME_TOKENS.radii.xs, fontSize: '0.785rem', color: '#991b1b', lineHeight: 1.6 }}>
-                  <div><strong>Elementos que se eliminarán:</strong></div>
-                  <ul style={{ margin: '0.25rem 0 0.5rem 1.25rem', padding: 0 }}>
-                    {opcionesPeligro.transcripciones && <li>Historial de transcripciones (.txt y .srt generados)</li>}
-                    {opcionesPeligro.expedientes && <li>Expedientes periciales, validaciones y notas</li>}
-                    {opcionesPeligro.grupos && <li>Grupos y carpetas organizadas</li>}
-                    {opcionesPeligro.modelos && <li>Registro de modelos OpenAI Whisper</li>}
-                    {opcionesPeligro.configuracion && <li>Ajustes y preferencias de usuario</li>}
-                  </ul>
-
-                  {!opcionesPeligro.modelos && (
-                    <div style={{ color: '#166534', fontWeight: 600, borderTop: '1px solid #fecaca', paddingTop: '0.35rem' }}>
-                      🛡️ Los modelos OpenAI Whisper se mantendrán guardados en tu equipo sin borrarse.
-                    </div>
-                  )}
-                </div>
-
-                <p style={{ margin: 0, fontSize: '0.8rem', color: '#7f1d1d', lineHeight: 1.5 }}>
-                  Para ejecutar la limpieza, escribe <code style={{ backgroundColor: '#fee2e2', padding: '0.1rem 0.35rem', borderRadius: '3px', fontWeight: 700 }}>ELIMINAR</code> en el campo siguiente y haz clic en el botón de confirmación.
-                </p>
-
-                <input
-                  type="text"
-                  value={textoConfirmacionPeligro}
-                  onChange={(e) => setTextoConfirmacionPeligro(e.target.value)}
-                  placeholder="Escribe: ELIMINAR"
-                  autoFocus
-                  style={{
-                    padding: '0.55rem 0.75rem',
-                    border: `1px solid ${textoConfirmacionPeligro.trim().toUpperCase() === 'ELIMINAR' ? '#16a34a' : '#fca5a5'}`,
-                    borderRadius: THEME_TOKENS.radii.sm,
-                    fontSize: '0.875rem',
-                    fontFamily: THEME_TOKENS.fonts.mono,
-                    outline: 'none',
-                    backgroundColor: textoConfirmacionPeligro.trim().toUpperCase() === 'ELIMINAR' ? '#f0fdf4' : '#fff',
-                    transition: 'border-color 0.15s, background-color 0.15s',
-                  }}
-                />
-
-                <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap' }}>
-                  <button
-                    onClick={handleConfirmarBorradoFinal}
-                    disabled={textoConfirmacionPeligro.trim().toUpperCase() !== 'ELIMINAR' && textoConfirmacionPeligro.trim().toUpperCase() !== 'ELIMINAR TODO'}
-                    style={{
-                      backgroundColor:
-                        textoConfirmacionPeligro.trim().toUpperCase() === 'ELIMINAR' || textoConfirmacionPeligro.trim().toUpperCase() === 'ELIMINAR TODO'
-                          ? '#dc2626'
-                          : '#fca5a5',
-                      color: '#ffffff',
-                      border: 'none',
-                      padding: '0.55rem 1.25rem',
-                      borderRadius: THEME_TOKENS.radii.sm,
-                      fontSize: '0.825rem',
-                      fontWeight: 700,
-                      cursor:
-                        textoConfirmacionPeligro.trim().toUpperCase() === 'ELIMINAR' || textoConfirmacionPeligro.trim().toUpperCase() === 'ELIMINAR TODO'
-                          ? 'pointer'
-                          : 'not-allowed',
-                      transition: 'background-color 0.15s',
-                    }}
-                  >
-                    🗑 Confirmar y depurar datos seleccionados
-                  </button>
-                  <button
-                    onClick={handleCancelarPeligro}
-                    style={{
-                      backgroundColor: 'transparent',
-                      border: `1px solid ${THEME_TOKENS.colors.borderStrong}`,
-                      color: THEME_TOKENS.colors.textSecondary,
-                      padding: '0.55rem 1rem',
-                      borderRadius: THEME_TOKENS.radii.sm,
-                      fontSize: '0.825rem',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    Volver
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
+      {/* ⚠️ Zona de Peligro — Depuración y borrado seguro (Componente Modular SRP) */}
+      <DangerZoneSection alEjecutarLimpieza={handleLimpiezaCompleta} />
 
       {/* Botón de donación discreto al pie */}
       <div style={{ marginTop: '2.5rem', display: 'flex', justifyContent: 'center' }}>

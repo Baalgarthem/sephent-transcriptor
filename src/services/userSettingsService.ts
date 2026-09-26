@@ -10,6 +10,7 @@
 
 import { DEFAULT_MODEL } from '../config/whisperConfig';
 import { ModelManager } from './modelManager';
+import { WhisperPathService } from './whisperPathService';
 import { OutputPathService, ModoDestinoSalida } from './transcription/outputPathService';
 
 export type IdiomaPreferido = 'auto' | 'en' | 'es' | 'fr' | 'de' | 'it' | 'pt' | 'zh';

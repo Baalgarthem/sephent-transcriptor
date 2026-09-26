@@ -40,8 +40,6 @@ export interface StoredTranscription {
   audioBlobUrl?: string;
 }
 
-import { REAL_SEED_TRANSCRIPTIONS } from './realTranscriptionsSeed';
-
 export class TranscriptionDatabase {
   private static STORAGE_KEY = 'sephent_transcriptions_database';
   private static INITIALIZED_KEY = 'sephent_transcriptions_initialized_v2';
@@ -117,55 +115,24 @@ export class TranscriptionDatabase {
 
   /**
    * Inicializa la base de datos con transcripciones auténticas ya procesadas por OpenAI Whisper
-   * si el sistema nunca ha sido inicializado.
+  /**
+   * Inicializa la base de datos vacía si el sistema nunca ha sido inicializado.
    */
   public static inicializarConSemillaSiVacio(): StoredTranscription[] {
-    this.purgarSimulacionesLegacy();
-    if (typeof localStorage !== 'undefined') {
-      try {
-        const yaInicializado = localStorage.getItem(this.INITIALIZED_KEY);
-        const data = localStorage.getItem(this.STORAGE_KEY);
-
-        if (!yaInicializado && (!data || data === '[]')) {
-          localStorage.setItem(this.STORAGE_KEY, JSON.stringify(REAL_SEED_TRANSCRIPTIONS));
-          localStorage.setItem(this.INITIALIZED_KEY, 'true');
-          this.memoriaRegistros = [...REAL_SEED_TRANSCRIPTIONS];
-          return [...REAL_SEED_TRANSCRIPTIONS];
-        }
-
-        if (data) {
-          const parsed = JSON.parse(data);
-          if (Array.isArray(parsed)) {
-            return parsed;
-          }
-        }
-      } catch (err) {
-        console.warn('Error al inicializar semilla de transcripciones reales:', err);
-      }
-    }
-    if (this.memoriaRegistros.length === 0) {
-      this.memoriaRegistros = [...REAL_SEED_TRANSCRIPTIONS];
-    }
-    return [...this.memoriaRegistros];
+    return this.obtenerTodas();
   }
 
   /**
-   * Helper seguro para leer la base de datos
+   * Helper seguro y rápido para leer la base de datos local
    */
   public static obtenerTodas(): StoredTranscription[] {
-    this.purgarSimulacionesLegacy();
     if (typeof localStorage !== 'undefined') {
       try {
-        const yaInicializado = localStorage.getItem(this.INITIALIZED_KEY);
         const data = localStorage.getItem(this.STORAGE_KEY);
-
-        if (!yaInicializado && (!data || data === '[]')) {
-          return this.inicializarConSemillaSiVacio();
-        }
-
         if (data) {
           const parsed = JSON.parse(data);
           if (Array.isArray(parsed)) {
+            this.memoriaRegistros = parsed;
             return parsed;
           }
         }
@@ -495,6 +462,8 @@ export class TranscriptionDatabase {
       speakerNames?: Record<string, string>;
       speakerRoles?: Record<string, string>;
       speakers?: Record<string, any>;
+      hashSha256?: string;
+      hashGeneradoEn?: string;
     }
   ): boolean {
     const lista = this.obtenerTodas();
@@ -511,6 +480,8 @@ export class TranscriptionDatabase {
           speakerNames: datos.speakerNames !== undefined ? { ...item.speakerNames, ...datos.speakerNames } : item.speakerNames,
           speakerRoles: datos.speakerRoles !== undefined ? { ...item.speakerRoles, ...datos.speakerRoles } : item.speakerRoles,
           speakers: datos.speakers !== undefined ? { ...item.speakers, ...datos.speakers } : item.speakers,
+          hashSha256: datos.hashSha256 !== undefined ? datos.hashSha256 : item.hashSha256,
+          hashGeneradoEn: datos.hashGeneradoEn !== undefined ? datos.hashGeneradoEn : item.hashGeneradoEn,
         };
       }
       return item;
