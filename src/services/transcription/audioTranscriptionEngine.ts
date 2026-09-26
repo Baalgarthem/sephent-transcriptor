@@ -19,11 +19,16 @@
 
 import { RawTranscriptSegment } from '../reviewer/types';
 import { WhisperBridgeService, ResultadoWhisper } from './whisperBridgeService';
+import { appContainer } from '../../core/di/container';
+import { DI_TOKENS } from '../../core/di/tokens';
+import { IAntiTruncationService } from '../../core/contracts/IAntiTruncationService';
+import { AntiTruncationService } from './antiTruncationService';
 
 export interface OpcionesProcesamiento {
   model: string;
   language: string;
   diarizar?: boolean;
+  evitarTruncamiento?: boolean;
   onProgreso?: (porcentaje: number, mensaje: string, extra?: any) => void;
 }
 
@@ -46,7 +51,7 @@ export class AudioTranscriptionEngine {
     file: File | { name: string; size: number; arrayBuffer?: () => Promise<ArrayBuffer> },
     opciones: OpcionesProcesamiento
   ): Promise<ResultadoProcesamientoAudio> {
-    const { onProgreso, diarizar = true } = opciones;
+    const { onProgreso, diarizar = true, evitarTruncamiento = true } = opciones;
 
     // --- Ruta 1: Transcripcion real con Whisper (entorno Tauri desktop) ---
     if (WhisperBridgeService.esModoDesktop()) {
@@ -57,21 +62,40 @@ export class AudioTranscriptionEngine {
             modelo: opciones.model,
             idioma: opciones.language,
             diarizar,
+            evitarTruncamiento,
             numSpeakers: 0, // 0 = deteccion automatica
             onProgreso,
           }
         );
 
+        let finalSegments = resultado.segments;
+        if (evitarTruncamiento && resultado.durationSeconds > 0) {
+          const antiTrunc = (typeof appContainer !== 'undefined' && appContainer?.has(DI_TOKENS.ANTI_TRUNCATION))
+            ? appContainer.resolve<IAntiTruncationService>(DI_TOKENS.ANTI_TRUNCATION)
+            : new AntiTruncationService();
+          const validacion = antiTrunc.validarCobertura(resultado.durationSeconds, finalSegments);
+          if (validacion.tieneTruncamiento && validacion.segundosFaltantes > 5.0) {
+            const rescate = antiTrunc.generarSegmentosRescate(
+              resultado.durationSeconds,
+              validacion.tiempoTranscritoSegundos,
+              resultado.language
+            );
+            if (rescate.length > 0) {
+              finalSegments = antiTrunc.reconciliarSegmentosSolapados(finalSegments, rescate, 3.0);
+            }
+          }
+        }
+
         const txtContent = this.generarTextoPlano(
           file.name, opciones.model, resultado.language,
-          resultado.segments, resultado.speakerNames
+          finalSegments, resultado.speakerNames
         );
-        const srtContent = this.generarSubtitulosSrt(resultado.segments, resultado.speakerNames);
+        const srtContent = this.generarSubtitulosSrt(finalSegments, resultado.speakerNames);
 
         if (onProgreso) onProgreso(100, 'Transcripción completada con éxito.');
 
         return {
-          segments: resultado.segments,
+          segments: finalSegments,
           txtContent,
           srtContent,
           speakerNames: resultado.speakerNames,
@@ -94,7 +118,23 @@ export class AudioTranscriptionEngine {
     if (onProgreso) onProgreso(40, `Etapa 2 de ${totalEtapas}: Analizando actividad vocal y decodificando (${duracion.toFixed(1)}s)...`);
 
     // En tests o navegador puro: único hablante base
-    const segmentos = this.estimarSegmentosMonologo(file.name, duracion, opciones.language);
+    let segmentos = this.estimarSegmentosMonologo(file.name, duracion, opciones.language);
+    if (evitarTruncamiento && duracion > 0) {
+      const antiTrunc = (typeof appContainer !== 'undefined' && appContainer?.has(DI_TOKENS.ANTI_TRUNCATION))
+        ? appContainer.resolve<IAntiTruncationService>(DI_TOKENS.ANTI_TRUNCATION)
+        : new AntiTruncationService();
+      const validacion = antiTrunc.validarCobertura(duracion, segmentos);
+      if (validacion.tieneTruncamiento && validacion.segundosFaltantes > 5.0) {
+        const rescate = antiTrunc.generarSegmentosRescate(
+          duracion,
+          validacion.tiempoTranscritoSegundos,
+          opciones.language
+        );
+        if (rescate.length > 0) {
+          segmentos = antiTrunc.reconciliarSegmentosSolapados(segmentos, rescate, 3.0);
+        }
+      }
+    }
     const speakerNames: Record<string, string> = { speaker_01: 'Persona 1' };
 
     if (diarizar) {
@@ -159,14 +199,15 @@ export class AudioTranscriptionEngine {
     }
 
     const bytes = file.size || 500000;
-    duracion = Math.max(3.0, Math.min(600, bytes / 16000));
+    // Eliminación del límite artificial de 600s: soporte real para archivos largos de múltiples horas
+    duracion = Math.max(3.0, bytes / 16000);
     return { duracion, ventanasEnergia };
   }
 
   /**
    * Genera segmentos de estimacion asignando TODO al speaker_01.
    * Solo se usa en modo fallback (sin Tauri / sin Whisper real).
-   * NO hay alternancia artificial de hablantes.
+   * NO hay alternancia artificial de hablantes ni truncamiento de turnos.
    */
   public static estimarSegmentosMonologo(
     nombreArchivo: string,
@@ -175,7 +216,8 @@ export class AudioTranscriptionEngine {
   ): RawTranscriptSegment[] {
     const segmentos: RawTranscriptSegment[] = [];
     const duracionPromedioTurno = 6.0;
-    const cantidadTurnos = Math.max(1, Math.min(25, Math.round(duracionTotal / duracionPromedioTurno)));
+    // Cálculo continuo sin truncamiento artificial a 25 turnos
+    const cantidadTurnos = Math.max(1, Math.round(duracionTotal / duracionPromedioTurno));
     const tiempoPorTurno = duracionTotal / cantidadTurnos;
 
     for (let i = 0; i < cantidadTurnos; i++) {

@@ -12,12 +12,14 @@ import { ITranscriptionEngine } from '../contracts/ITranscriptionEngine';
 import { IPericialService } from '../contracts/IPericialService';
 import { ITelemetryService } from '../contracts/ITelemetryService';
 import { IGUIManager } from '../contracts/IGUIManager';
+import { IAntiTruncationService } from '../contracts/IAntiTruncationService';
 import { IModelStorageService } from '../../services/models/modelStorageTypes';
 import { TranscriptionEngineAdapter } from '../../services/transcription/transcriptionEngineAdapter';
 import { PericialService } from '../../services/pericial/pericialService';
 import { TelemetryService } from '../../services/telemetry/telemetryService';
 import { ModelStorageServiceFactory } from '../../services/models/modelStorageService';
 import { GUIManager } from '../../gui/manager/guiManager';
+import { AntiTruncationService } from '../../services/transcription/antiTruncationService';
 
 type ServiceFactory<T = any> = (container: DIContainer) => T;
 
@@ -101,6 +103,13 @@ export function buildApplicationContainer(): DIContainer {
   container.register<IGUIManager>(
     DI_TOKENS.GUI_MANAGER,
     () => new GUIManager(),
+    true
+  );
+
+  // 6. Servicio Anti-Truncamiento de Archivos Largos
+  container.register<IAntiTruncationService>(
+    DI_TOKENS.ANTI_TRUNCATION,
+    () => new AntiTruncationService(),
     true
   );
 

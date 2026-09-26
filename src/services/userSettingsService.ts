@@ -39,6 +39,7 @@ export interface ConfiguracionUsuario {
   rolesPersonalizados?: string[];
   mostrarRolEnNombre?: boolean;
   interfazGraficaId?: string;
+  evitarTruncamiento?: boolean;
 }
 
 export class UserSettingsService {
@@ -56,6 +57,7 @@ export class UserSettingsService {
     rolesPersonalizados: [],
     mostrarRolEnNombre: false,
     interfazGraficaId: 'classic',
+    evitarTruncamiento: true,
   };
 
   private static memoriaConfiguracion: ConfiguracionUsuario | null = null;
@@ -103,6 +105,7 @@ export class UserSettingsService {
       rolesPersonalizados: rolesPersistidos,
       mostrarRolEnNombre: typeof configRecuperada.mostrarRolEnNombre === 'boolean' ? configRecuperada.mostrarRolEnNombre : this.configuracionPorDefecto.mostrarRolEnNombre,
       interfazGraficaId: configRecuperada.interfazGraficaId || this.configuracionPorDefecto.interfazGraficaId,
+      evitarTruncamiento: typeof configRecuperada.evitarTruncamiento === 'boolean' ? configRecuperada.evitarTruncamiento : this.configuracionPorDefecto.evitarTruncamiento,
     };
 
     this.memoriaConfiguracion = configFinal;

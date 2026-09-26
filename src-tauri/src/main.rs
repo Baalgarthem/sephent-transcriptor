@@ -1421,6 +1421,7 @@ async fn transcribir_audio_whisper(
     idioma: String,
     diarizar: Option<bool>,
     ruta_modelos: Option<String>,
+    evitar_truncamiento: Option<bool>,
     window: Window,
 ) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
@@ -1460,6 +1461,12 @@ async fn transcribir_audio_whisper(
             idioma.to_lowercase()
         };
         let diarizar_activo = diarizar.unwrap_or(true);
+        let evitar_trunc_activo = evitar_truncamiento.unwrap_or(true);
+        let output_json_path = temp_dir.join(format!(
+            "whisper_out_{}_{}.json",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis()
+        ));
 
         let mut cmd = Command::new(&info.python_ruta);
         let mut python_path_entries = vec![temp_dir.to_string_lossy().to_string()];
@@ -1485,6 +1492,10 @@ async fn transcribir_audio_whisper(
         cmd.arg("0");
         cmd.arg("--diarize");
         cmd.arg(if diarizar_activo { "true" } else { "false" });
+        cmd.arg("--anti-truncation");
+        cmd.arg(if evitar_trunc_activo { "true" } else { "false" });
+        cmd.arg("--output-json");
+        cmd.arg(&output_json_path);
         // v0.2.0: permitir que Python detecte y use CUDA/GPU automáticamente
         cmd.arg("--device");
         cmd.arg("auto");
@@ -1618,23 +1629,40 @@ async fn transcribir_audio_whisper(
             *lock = None;
         }
 
-        // Recoger el JSON de stdout desde el hilo paralelo
-        let salida_stdout = rx_stdout.recv().unwrap_or_default();
-        let salida_limpia = salida_stdout.trim();
+        // Si se generó el archivo JSON directo en disco, leerlo para evitar truncamientos de pipe del SO
+        let mut contenido_json = String::new();
+        let mut leido_de_archivo = false;
 
-        if !status.success() || salida_limpia.is_empty() {
-            return Err(format!("El proceso de Whisper finalizó con código {:?}. Salida: {}", status.code(), salida_limpia));
+        if output_json_path.is_file() {
+            if let Ok(disk_content) = std::fs::read_to_string(&output_json_path) {
+                let trimmed = disk_content.trim();
+                if !trimmed.is_empty() {
+                    contenido_json = trimmed.to_string();
+                    leido_de_archivo = true;
+                }
+            }
+            let _ = std::fs::remove_file(&output_json_path);
+        }
+
+        if !leido_de_archivo {
+            // Recoger el JSON de stdout desde el hilo paralelo como respaldo
+            let salida_stdout = rx_stdout.recv().unwrap_or_default();
+            contenido_json = salida_stdout.trim().to_string();
+        }
+
+        if !status.success() || contenido_json.is_empty() {
+            return Err(format!("El proceso de Whisper finalizó con código {:?}. Salida: {}", status.code(), contenido_json));
         }
 
         // Extraer el bloque JSON de forma robusta en caso de que existan textos previos o posteriores en stdout
-        let json_extraido = if let (Some(inicio), Some(fin)) = (salida_limpia.find('{'), salida_limpia.rfind('}')) {
+        let json_extraido = if let (Some(inicio), Some(fin)) = (contenido_json.find('{'), contenido_json.rfind('}')) {
             if fin >= inicio {
-                &salida_limpia[inicio..=fin]
+                &contenido_json[inicio..=fin]
             } else {
-                salida_limpia
+                &contenido_json
             }
         } else {
-            salida_limpia
+            &contenido_json
         };
 
         if let Ok(val) = serde_json::from_str::<serde_json::Value>(json_extraido) {
@@ -1642,7 +1670,7 @@ async fn transcribir_audio_whisper(
                 return Err(format!("Error en motor Whisper: {}", err_msg));
             }
         } else {
-            return Err(format!("Respuesta inválida del motor de transcripción (no se pudo parsear JSON). Salida: {}", salida_limpia));
+            return Err(format!("Respuesta inválida del motor de transcripción (no se pudo parsear JSON). Salida: {}", contenido_json));
         }
 
         let _ = window.emit("transcripcion-progreso", serde_json::json!({

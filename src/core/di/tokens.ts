@@ -11,6 +11,7 @@ export const DI_TOKENS = {
   TELEMETRY_SERVICE: 'ITelemetryService',
   USER_SETTINGS: 'IUserSettingsService',
   GUI_MANAGER: 'IGUIManager',
+  ANTI_TRUNCATION: 'IAntiTruncationService',
 } as const;
 
 export type DITokenKey = keyof typeof DI_TOKENS;

@@ -23,11 +23,13 @@ export interface ResultadoWhisper {
 }
 
 import { WhisperPathService } from '../whisperPathService';
+import { UserSettingsService } from '../userSettingsService';
 
 export interface OpcionesWhisper {
   modelo: string;
   idioma: string;
   diarizar?: boolean;
+  evitarTruncamiento?: boolean;
   rutaModelos?: string;
   numSpeakers?: number; // 0=auto, 1=monologo, 2=dialogo forzado
   onProgreso?: (porcentaje: number, mensaje: string, extra?: any) => void;
@@ -88,6 +90,10 @@ export class WhisperBridgeService {
     try {
       const infoRuta = WhisperPathService.obtenerRutaOficialPorDefecto();
       const rutaModelosEfectiva = opciones.rutaModelos || (infoRuta.esRutaPersonalizada ? infoRuta.rutaPorDefectoOficial : null);
+      const conf = UserSettingsService.obtenerConfiguracion();
+      const evitarTruncamiento = opciones.evitarTruncamiento !== undefined
+        ? opciones.evitarTruncamiento
+        : (conf.evitarTruncamiento ?? true);
 
       const jsonRes = await tauri.invoke('transcribir_audio_whisper', {
         rutaAudio: filePath,
@@ -95,6 +101,7 @@ export class WhisperBridgeService {
         idioma: idioma || 'auto',
         diarizar,
         rutaModelos: rutaModelosEfectiva,
+        evitarTruncamiento,
       });
 
       if (unlisten) unlisten();

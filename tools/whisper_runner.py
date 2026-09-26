@@ -1128,7 +1128,8 @@ def normalizar_audio_amplitud(audio_np: np.ndarray, target_peak: float = 0.95) -
 
 def transcribir(file_path: str, model_name: str, language: str,
                 num_speakers: int, device_override: str = "auto",
-                diarize: bool = True, model_dir: str = None) -> dict:
+                diarize: bool = True, model_dir: str = None,
+                anti_truncation: bool = True) -> dict:
     """
     Carga Whisper, transcribe y opcionalmente aplica diarización. Retorna dict ResultadoWhisper.
 
@@ -1199,21 +1200,6 @@ def transcribir(file_path: str, model_name: str, language: str,
         except Exception as e_lang:
             print(f"[whisper_runner] Aviso candado de idioma: {e_lang}", file=sys.stderr, flush=True)
 
-    # Parámetros de transcripción optimizados
-    kwargs = {
-        "word_timestamps": True,
-        "verbose": None,
-        # Greedy decoding (temperatura 0): primera pasada más rápida y determinista.
-        # Whisper hará fallback a temperatura mayor si la confianza es baja.
-        "temperature": 0,
-        "beam_size": 5,
-        "best_of": 5 if device == "cpu" else 5,
-        "fp16": fp16,
-        "condition_on_previous_text": True,
-    }
-    if language_usado and language_usado.lower() not in ("auto", ""):
-        kwargs["language"] = language_usado
-
     # Precargar audio para obtener duración precisa y habilitar telemetría con ETA
     audio_np = None
     audio_duration = 0.0
@@ -1224,6 +1210,32 @@ def transcribir(file_path: str, model_name: str, language: str,
         print(f"[whisper_runner] AUDIO_DURATION: {audio_duration:.2f}s", file=sys.stderr, flush=True)
     except Exception as e_dur:
         print(f"[whisper_runner] Aviso medición duración audio: {e_dur}", file=sys.stderr, flush=True)
+
+    # Parámetros de transcripción optimizados con candados anti-truncamiento
+    # En audios extensos (>10 min = 600s), desactivar condition_on_previous_text para evitar que
+    # Whisper entre en bucles de alucinación o silencios repetitivos que causan truncamiento prematuro.
+    desactivar_condicion_previa = anti_truncation and (audio_duration > 600.0)
+    kwargs = {
+        "word_timestamps": True,
+        "verbose": None,
+        # Greedy decoding (temperatura 0): primera pasada más rápida y determinista.
+        # Whisper hará fallback a temperatura mayor si la confianza es baja.
+        "temperature": 0,
+        "beam_size": 5,
+        "best_of": 5 if device == "cpu" else 5,
+        "fp16": fp16,
+        "condition_on_previous_text": not desactivar_condicion_previa,
+        "compression_ratio_threshold": 2.4,
+        "no_speech_threshold": 0.6,
+        "logprob_threshold": -1.0,
+    }
+    if desactivar_condicion_previa:
+        print(f"[whisper_runner] Protección anti-truncamiento activa: audio extenso ({audio_duration:.1f}s > 600s). Decodificación independiente por ventana para garantizar cobertura íntegra.", file=sys.stderr, flush=True)
+    elif anti_truncation:
+        print(f"[whisper_runner] Protección anti-truncamiento activa: monitoreando cobertura temporal completa.", file=sys.stderr, flush=True)
+
+    if language_usado and language_usado.lower() not in ("auto", ""):
+        kwargs["language"] = language_usado
 
     print(f"[whisper_runner] ETAPA 2/{total_etapas}: Transcribiendo audio: {os.path.basename(file_path)}", file=sys.stderr, flush=True)
 
@@ -1282,9 +1294,53 @@ def transcribir(file_path: str, model_name: str, language: str,
 
     segments_raw = result.get("segments", [])
     detected_language = result.get("language", language_usado)
-    duration = segments_raw[-1]["end"] if segments_raw else audio_duration
+    last_end = float(segments_raw[-1]["end"]) if segments_raw else 0.0
+    duration = last_end if segments_raw else audio_duration
 
     print(f"[whisper_runner] Segmentos: {len(segments_raw)}, idioma: {detected_language}", file=sys.stderr, flush=True)
+
+    # ── Rescate Anti-Truncamiento de Cola (v0.2.3) ──────────────────────────────
+    # Si Whisper se detuvo prematuramente dejando más de 10s al final con energía acústica
+    if anti_truncation and audio_np is not None and audio_duration > 0 and (audio_duration - last_end) > 10.0:
+        diferencia_cola = audio_duration - last_end
+        rescue_start = max(0.0, last_end - 1.0)
+        start_sample = int(rescue_start * 16000)
+        tail_audio = audio_np[start_sample:]
+        max_amp = float(np.max(np.abs(tail_audio))) if len(tail_audio) > 0 else 0.0
+
+        if max_amp > 0.01 and len(tail_audio) >= 16000:
+            print(
+                f"[whisper_runner] ALERTA TRUNCAMIENTO DETECTADO: El audio dura {audio_duration:.2f}s "
+                f"pero la transcripción concluyó en {last_end:.2f}s (diferencia de {diferencia_cola:.2f}s). "
+                f"Iniciando rescate de cola...",
+                file=sys.stderr, flush=True
+            )
+            try:
+                rescue_kwargs = dict(kwargs)
+                rescue_kwargs["condition_on_previous_text"] = False
+                rescue_kwargs["temperature"] = (0.0, 0.2, 0.4)
+                rescue_res = model.transcribe(tail_audio, **rescue_kwargs)
+                rescue_segs = rescue_res.get("segments", [])
+                nuevos_segs = 0
+                for r_seg in rescue_segs:
+                    r_start = round(float(r_seg.get("start", 0.0)) + rescue_start, 3)
+                    r_end = round(float(r_seg.get("end", 0.0)) + rescue_start, 3)
+                    r_text = str(r_seg.get("text", "")).strip()
+                    if r_end > last_end and r_text:
+                        r_seg_copy = dict(r_seg)
+                        r_seg_copy["start"] = r_start
+                        r_seg_copy["end"] = r_end
+                        r_seg_copy["text"] = r_text
+                        segments_raw.append(r_seg_copy)
+                        nuevos_segs += 1
+                if nuevos_segs > 0:
+                    last_end = float(segments_raw[-1]["end"])
+                    duration = last_end
+                    print(f"[whisper_runner] Rescate de cola finalizado con éxito: {nuevos_segs} segmentos recuperados hasta {duration:.2f}s.", file=sys.stderr, flush=True)
+                else:
+                    print(f"[whisper_runner] Rescate de cola: no se detectó texto inteligible adicional en la porción final.", file=sys.stderr, flush=True)
+            except Exception as e_rescue:
+                print(f"[whisper_runner] Aviso en rescate de cola: {e_rescue}", file=sys.stderr, flush=True)
 
     # Cargar audio en numpy si aún no se había cargado
     if audio_np is None:
@@ -1439,6 +1495,10 @@ def main():
                         help="Dispositivo de inferencia: auto, cuda, cpu (por defecto: auto)")
     parser.add_argument("--model-dir", default=None,
                         help="Directorio personalizado donde se alojan los modelos Whisper (download_root)")
+    parser.add_argument("--anti-truncation", default="true",
+                        help="true/false para activar protección anti-truncamiento en audios largos")
+    parser.add_argument("--output-json", default=None,
+                        help="Ruta a archivo en disco donde volcar el resultado JSON completo para evitar saturación de pipes")
     args = parser.parse_args()
 
     if not os.path.isfile(args.file):
@@ -1446,6 +1506,7 @@ def main():
         sys.exit(1)
 
     diarize_enabled = str(args.diarize).strip().lower() not in ("false", "0", "no", "off", "f")
+    anti_truncation_enabled = str(args.anti_truncation).strip().lower() not in ("false", "0", "no", "off", "f")
 
     try:
         resultado = transcribir(
@@ -1455,9 +1516,21 @@ def main():
             args.num_speakers,
             args.device,
             diarize=diarize_enabled,
-            model_dir=args.model_dir
+            model_dir=args.model_dir,
+            anti_truncation=anti_truncation_enabled
         )
-        print(json.dumps(resultado, ensure_ascii=False))
+
+        if args.output_json:
+            out_file = os.path.abspath(args.output_json)
+            parent_d = os.path.dirname(out_file)
+            if parent_d and not os.path.exists(parent_d):
+                os.makedirs(parent_d, exist_ok=True)
+            with open(out_file, "w", encoding="utf-8") as f:
+                json.dump(resultado, f, ensure_ascii=False)
+            print(f"[whisper_runner] Resultado guardado en archivo directo: {out_file}", file=sys.stderr, flush=True)
+            print(json.dumps({"status": "success", "output_file": out_file}, ensure_ascii=False))
+        else:
+            print(json.dumps(resultado, ensure_ascii=False))
     except Exception as e:
         print(json.dumps({"error": str(e)}))
         sys.exit(1)

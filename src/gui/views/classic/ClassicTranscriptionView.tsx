@@ -49,6 +49,7 @@ export default function ClassicTranscriptionView(): React.ReactElement {
   });
   const [language, setLanguage] = useState<LanguageOption>(configInicial.idioma as LanguageOption);
   const [diarizarHablantes, setDiarizarHablantes] = useState<boolean>(configInicial.diarizarHablantes ?? true);
+  const [evitarTruncamiento, setEvitarTruncamiento] = useState<boolean>(configInicial.evitarTruncamiento ?? true);
   const [outputTxt, setOutputTxt] = useState(configInicial.outputTxt);
   const [outputSrt, setOutputSrt] = useState(configInicial.outputSrt);
   const [outputVideo, setOutputVideo] = useState(configInicial.outputVideo);
@@ -539,6 +540,7 @@ export default function ClassicTranscriptionView(): React.ReactElement {
           modelo: model,
           idioma: language,
           diarizar: diarizarHablantes,
+          evitarTruncamiento,
           onProgreso: (telemetria: TelemetriaTranscripcion) => {
             if (!cancelacionSolicitada.current) {
               setProgress(telemetria.porcentaje);
@@ -1309,6 +1311,77 @@ export default function ClassicTranscriptionView(): React.ReactElement {
                 </label>
               </HoverTooltip>
             </div>{/* /Paso 4 */}
+
+            {/* 4.1. Protección Anti-truncamiento para archivos largos */}
+            <div
+              style={{
+                backgroundColor: evitarTruncamiento ? 'rgba(59, 130, 246, 0.08)' : THEME_TOKENS.colors.bgSecondary,
+                border: `1px solid ${evitarTruncamiento ? 'rgba(59, 130, 246, 0.35)' : THEME_TOKENS.colors.borderStrong}`,
+                borderRadius: THEME_TOKENS.radii.md,
+                padding: '0.85rem 1.1rem',
+                marginTop: '0.65rem',
+                transition: `all ${THEME_TOKENS.transitions.fast}`,
+              }}
+            >
+              <HoverTooltip content="Previene el recorte prematuro y los bucles de silencio en grabaciones de más de 10 minutos o varias horas de duración. Aplica decodificación por ventanas independientes y rescate automático de cola." maxWidth="380px">
+                <label
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.85rem',
+                    cursor: isRunning ? 'not-allowed' : 'pointer',
+                    userSelect: 'none',
+                  }}
+                >
+                  <span style={{ position: 'relative', display: 'inline-block', width: '44px', height: '24px', flexShrink: 0 }}>
+                    <input
+                      type="checkbox"
+                      checked={evitarTruncamiento}
+                      onChange={(e) => {
+                        setEvitarTruncamiento(e.target.checked);
+                        UserSettingsService.guardarConfiguracion({ evitarTruncamiento: e.target.checked });
+                      }}
+                      disabled={isRunning}
+                      style={{ opacity: 0, width: 0, height: 0, position: 'absolute' }}
+                    />
+                    <span
+                      style={{
+                        position: 'absolute',
+                        inset: 0,
+                        borderRadius: '12px',
+                        backgroundColor: evitarTruncamiento ? '#2563eb' : THEME_TOKENS.colors.borderStrong,
+                        transition: `background-color ${THEME_TOKENS.transitions.fast}`,
+                        cursor: isRunning ? 'not-allowed' : 'pointer',
+                      }}
+                    />
+                    <span
+                      style={{
+                        position: 'absolute',
+                        top: '3px',
+                        left: evitarTruncamiento ? '23px' : '3px',
+                        width: '18px',
+                        height: '18px',
+                        borderRadius: '50%',
+                        backgroundColor: THEME_TOKENS.colors.surfaceBase,
+                        boxShadow: THEME_TOKENS.shadows.sm,
+                        transition: `left ${THEME_TOKENS.transitions.fast}`,
+                        pointerEvents: 'none',
+                      }}
+                    />
+                  </span>
+                  <span>
+                    <strong style={{ fontSize: '0.875rem', color: THEME_TOKENS.colors.textPrimary }}>
+                      {evitarTruncamiento ? '🛡️ Protección Anti-truncamiento activa' : '⚪ Modo estándar (sin blindaje de cola)'}
+                    </strong>
+                    <span style={{ display: 'block', fontSize: '0.775rem', color: THEME_TOKENS.colors.textSecondary, marginTop: '0.15rem' }}>
+                      {evitarTruncamiento
+                        ? 'Garantiza cobertura íntegra del 100% en grabaciones largas (>10 min y multi-hora)'
+                        : 'Decodificación Whisper estándar sin rescate de cola acústica'}
+                    </span>
+                  </span>
+                </label>
+              </HoverTooltip>
+            </div>
 
             {/* 5. Opciones de Salida Documental */}
             <div style={{ paddingTop: '0.5rem', borderTop: `1px solid ${THEME_TOKENS.colors.borderSubtle}` }}>

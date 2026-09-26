@@ -42,6 +42,7 @@ export default function StreamlinedTranscriptionView(): React.ReactElement {
   });
   const [idioma, setIdioma] = useState<string>(configInicial.idioma || 'auto');
   const [diarizar, setDiarizar] = useState<boolean>(configInicial.diarizarHablantes ?? true);
+  const [evitarTruncamiento, setEvitarTruncamiento] = useState<boolean>(configInicial.evitarTruncamiento ?? true);
   const [formatoTxt, setFormatoTxt] = useState<boolean>(configInicial.outputTxt);
   const [formatoSrt, setFormatoSrt] = useState<boolean>(configInicial.outputSrt);
   const [formatoVideo, setFormatoVideo] = useState<boolean>(configInicial.outputVideo);
@@ -128,6 +129,7 @@ export default function StreamlinedTranscriptionView(): React.ReactElement {
           modelo,
           idioma,
           diarizar,
+          evitarTruncamiento,
           onProgreso: (t: TelemetriaTranscripcion) => {
             if (!cancelacionSolicitada.current) {
               setTelemetria({
@@ -321,6 +323,39 @@ export default function StreamlinedTranscriptionView(): React.ReactElement {
             />
             <span style={{ fontSize: '0.825rem', fontWeight: 600, color: diarizar ? '#15803d' : '#64748b' }}>
               {diarizar ? '✓ Activada (Quién habla cuándo)' : '✕ Desactivada (Solo texto plano)'}
+            </span>
+          </label>
+        </div>
+
+        {/* Anti-truncamiento Toggle (Archivos Largos) */}
+        <div>
+          <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: THEME_TOKENS.colors.textSecondary, marginBottom: '0.35rem' }}>
+            🛡️ Archivos Largos (Anti-truncamiento):
+          </label>
+          <label
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+              cursor: enEjecucion ? 'not-allowed' : 'pointer',
+              padding: '0.45rem 0.75rem',
+              backgroundColor: evitarTruncamiento ? 'rgba(59, 130, 246, 0.1)' : 'rgba(100, 116, 139, 0.1)',
+              border: `1px solid ${evitarTruncamiento ? 'rgba(59, 130, 246, 0.4)' : 'rgba(100, 116, 139, 0.3)'}`,
+              borderRadius: THEME_TOKENS.radii.sm,
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={evitarTruncamiento}
+              onChange={(e) => {
+                setEvitarTruncamiento(e.target.checked);
+                UserSettingsService.guardarConfiguracion({ evitarTruncamiento: e.target.checked });
+              }}
+              disabled={enEjecucion}
+              style={{ cursor: 'pointer', accentColor: '#2563eb' }}
+            />
+            <span style={{ fontSize: '0.825rem', fontWeight: 600, color: evitarTruncamiento ? '#2563eb' : '#64748b' }}>
+              {evitarTruncamiento ? '✓ Blindaje Activo (>10 min y multi-hora)' : '✕ Estándar (Sin rescate de cola)'}
             </span>
           </label>
         </div>

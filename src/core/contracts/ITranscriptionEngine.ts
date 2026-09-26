@@ -23,6 +23,7 @@ export interface OpcionesTranscripcionContrato {
   modelo: string;
   idioma: string;
   diarizar: boolean;
+  evitarTruncamiento?: boolean;
   rutaModelos?: string;
   onProgreso?: (telemetria: TelemetriaTranscripcion) => void;
 }

@@ -62,6 +62,7 @@ export class TranscriptionEngineAdapter implements ITranscriptionEngine {
       model: opciones.modelo,
       language: opciones.idioma,
       diarizar: opciones.diarizar,
+      evitarTruncamiento: opciones.evitarTruncamiento,
       onProgreso: onProgresoInterno,
     });
 
