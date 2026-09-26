@@ -1702,15 +1702,19 @@ async fn transcribir_audio_whisper(
                                 let eta_sec = v.get("eta_sec").and_then(|x| x.as_f64()).map(|s| s as u64);
                                 let speed = v.get("speed").and_then(|x| x.as_f64()).unwrap_or(1.0);
                                 let stage = v.get("stage").and_then(|x| x.as_u64()).unwrap_or(2) as usize;
+                                let proc_sec = v.get("processed_sec").and_then(|x| x.as_f64());
+                                let tot_sec = v.get("total_sec").and_then(|x| x.as_f64());
                                 let msg = v.get("msg").and_then(|x| x.as_str()).unwrap_or("Decodificando audio con Whisper...").to_string();
 
                                 let _ = window_clone.emit("transcripcion-progreso", serde_json::json!({
-                                    "porcentaje": pct.round() as u32,
+                                    "porcentaje": pct,
                                     "mensaje": msg,
                                     "tiempoEstimadoSegundos": eta_sec,
                                     "velocidadFactor": speed,
                                     "etapaActual": stage,
                                     "totalEtapas": total_etapas,
+                                    "segundosProcesadosAudio": proc_sec,
+                                    "totalSegundosAudio": tot_sec,
                                     "detalle": trimmed
                                 }));
                                 continue;

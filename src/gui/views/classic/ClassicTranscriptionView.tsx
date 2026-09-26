@@ -60,7 +60,7 @@ export default function ClassicTranscriptionView(): React.ReactElement {
   const [isCanceling, setIsCanceling] = useState(false);
   const cancelacionSolicitada = useRef(false);
 
-  // Telemetría con % exacto y tiempo estimado de completado (ETA)
+  // Telemetría de alta resolución con % exacto, tiempo estimado (ETA) y tiempo de audio
   const [telemetriaActual, setTelemetriaActual] = useState<{
     porcentaje: number;
     etapaActual: number;
@@ -68,6 +68,8 @@ export default function ClassicTranscriptionView(): React.ReactElement {
     mensaje: string;
     tiempoEstimadoSegundos: number;
     velocidadFactor: number;
+    segundosProcesadosAudio?: number;
+    totalSegundosAudio?: number;
     nombreArchivo?: string;
   }>({
     porcentaje: 0,
@@ -77,6 +79,8 @@ export default function ClassicTranscriptionView(): React.ReactElement {
     tiempoEstimadoSegundos: 0,
     velocidadFactor: 1.0,
   });
+
+  const [isDragOver, setIsDragOver] = useState(false);
 
   // Modo de destino de las transcripciones y base de datos persistente
   const [modoDestino, setModoDestino] = useState<ModoDestinoSalida>(configInicial.modoDestino);
@@ -565,6 +569,8 @@ export default function ClassicTranscriptionView(): React.ReactElement {
                 mensaje: msgFull,
                 tiempoEstimadoSegundos: telemetria.tiempoEstimadoSegundos || 0,
                 velocidadFactor: telemetria.velocidadFactor || 1.0,
+                segundosProcesadosAudio: telemetria.segundosProcesadosAudio,
+                totalSegundosAudio: telemetria.totalSegundosAudio,
                 nombreArchivo: file.name,
               });
             }
@@ -746,528 +752,31 @@ export default function ClassicTranscriptionView(): React.ReactElement {
 
   return (
     <div style={{ fontFamily: THEME_TOKENS.fonts.sans, width: '100%' }}>
-      {/* Barra de Control Superior Oscura / Ejecutiva (Mobile First) */}
-      <div className="top-control-bar" style={{ backgroundColor: THEME_TOKENS.colors.surfaceDark, border: `1px solid ${THEME_TOKENS.colors.borderDark}` }}>
-        <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <span style={{ fontSize: '0.85rem', color: '#DCDAD1' }}>◈</span>
-            <strong style={{ fontSize: '0.8125rem', color: '#FFFFFF', letterSpacing: '0.02em', textTransform: 'uppercase' }}>
-              Ruta Oficial de Modelos (OpenAI Whisper)
-            </strong>
-            <InfoHelpButton
-              variant="onDark"
-              symbolColor="#FFFFFF"
-              tooltip="Ruta oficial de OpenAI Whisper. Si un modelo ya existe en tu equipo, Sephent lo detecta automáticamente por SHA-256 para no descargarlo de nuevo."
-              onClick={() => {
-                setSeccionAyudaInicial('modelos');
-                setModalAyudaAbierto(true);
-              }}
-            />
-          </div>
-          <p
-            style={{
-              fontFamily: THEME_TOKENS.fonts.mono,
-              fontSize: '0.8rem',
-              color: '#DCDAD1',
-              margin: '0.2rem 0 0 1.25rem',
-              wordBreak: 'break-all',
-            }}
-          >
-            {rutaOficialTexto || 'Detectando ruta oficial...'}
-          </p>
-        </div>
+      {/* Contenedor Dashboard Principal de Dos Columnas */}
+      <div className="dashboard-two-column-layout">
 
-        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-          <button
-            onClick={handleAbrirCarpetaLogs}
-            className="top-control-btn"
-            title="Abrir carpeta de registros técnicos y diagnósticos del sistema"
-            style={{
-              backgroundColor: 'rgba(255, 255, 255, 0.06)',
-              color: '#FFFFFF',
-              border: '1px solid rgba(255, 255, 255, 0.35)',
-              borderRadius: THEME_TOKENS.radii.sm,
-              fontSize: '0.8125rem',
-              fontWeight: 500,
-              cursor: 'pointer',
-              whiteSpace: 'nowrap',
-              padding: '0.5rem 0.85rem',
-              transition: `all ${THEME_TOKENS.transitions.fast}`,
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.15)';
-              e.currentTarget.style.borderColor = '#FFFFFF';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.06)';
-              e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.35)';
-            }}
-          >
-            📋 Logs de errores
-          </button>
-          <button
-            onClick={() => setModalModelosAbierto(true)}
-            className="top-control-btn"
-            style={{
-              backgroundColor: 'rgba(255, 255, 255, 0.06)',
-              color: '#FFFFFF',
-              border: '1px solid rgba(255, 255, 255, 0.35)',
-              borderRadius: THEME_TOKENS.radii.sm,
-              fontSize: '0.8125rem',
-              fontWeight: 500,
-              cursor: 'pointer',
-              whiteSpace: 'nowrap',
-              padding: '0.5rem 1rem',
-              transition: `all ${THEME_TOKENS.transitions.fast}`,
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.15)';
-              e.currentTarget.style.borderColor = '#FFFFFF';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.06)';
-              e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.35)';
-            }}
-          >
-            ⚙️ Gestionar modelos
-          </button>
-        </div>
-      </div>
+        {/* ═══ BARRA LATERAL IZQUIERDA: CONFIGURACIONES GENERALES & PERICIAL AISLADO ═══ */}
+        <aside className="dashboard-sidebar">
 
-      {/* Contenedor de Ruta para Guardar Transcripciones (Mismo estilo que la ruta oficial) */}
-      <div
-        className="top-control-bar"
-        style={{
-          backgroundColor: THEME_TOKENS.colors.surfaceDark,
-          border: `1px solid ${THEME_TOKENS.colors.borderDark}`,
-          marginTop: '-0.75rem',
-          marginBottom: '1.5rem',
-        }}
-      >
-        <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <span style={{ fontSize: '0.85rem', color: '#DCDAD1' }}>📁</span>
-            <strong
-              style={{
-                fontSize: '0.8125rem',
-                color: '#FFFFFF',
-                letterSpacing: '0.02em',
-                textTransform: 'uppercase',
-              }}
-            >
-              Ruta para guardar transcripciones
-            </strong>
-          </div>
-          <p
-            style={{
-              fontFamily: THEME_TOKENS.fonts.mono,
-              fontSize: '0.8rem',
-              color: '#DCDAD1',
-              margin: '0.2rem 0 0 1.25rem',
-              wordBreak: 'break-all',
-            }}
-          >
-            {modoDestino === 'default'
-              ? OutputPathService.obtenerRutaPorDefecto()
-              : 'Misma carpeta donde está el archivo original'}
-          </p>
-
-          <div
-            style={{
-              margin: '0.45rem 0 0 1.25rem',
-              display: 'flex',
-              gap: '1.25rem',
-              alignItems: 'center',
-              flexWrap: 'wrap',
-            }}
-          >
-            <HoverTooltip content="Guarda las transcripciones en la carpeta central TranscriptorOutputs de tu usuario">
-              <label
-                style={{
-                  fontSize: '0.785rem',
-                  color: '#FFFFFF',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '0.4rem',
-                  cursor: 'pointer',
-                  fontWeight: 500,
+          {/* 1. Tarjeta: Configuraciones Generales */}
+          <div className="dashboard-sidebar-card">
+            <div className="dashboard-sidebar-title">
+              <span>⚙️ Configuraciones Generales</span>
+              <InfoHelpButton
+                tooltip="Configuraciones globales de la sesión: idioma sonoro, discriminación de hablantes por defecto, blindaje anti-truncamiento y formatos requeridos."
+                onClick={() => {
+                  setSeccionAyudaInicial('general');
+                  setModalAyudaAbierto(true);
                 }}
-              >
-                <input
-                  type="radio"
-                  name="modoDestinoSalida"
-                  value="default"
-                  checked={modoDestino === 'default'}
-                  onChange={() => handleCambiarModoDestino('default')}
-                />
-                Usar ruta por defecto
+              />
+            </div>
+
+            {/* 1.1 Idioma del Audio */}
+            <div style={{ marginBottom: '1.25rem' }}>
+              <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: THEME_TOKENS.colors.textPrimary, marginBottom: '0.35rem' }}>
+                Idioma del registro sonoro
               </label>
-            </HoverTooltip>
-
-            <HoverTooltip content="Guarda las transcripciones en la misma carpeta donde reside tu audio de origen">
-              <label
-                style={{
-                  fontSize: '0.785rem',
-                  color: '#FFFFFF',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '0.4rem',
-                  cursor: 'pointer',
-                  fontWeight: 500,
-                }}
-              >
-                <input
-                  type="radio"
-                  name="modoDestinoSalida"
-                  value="original"
-                  checked={modoDestino === 'original'}
-                  onChange={() => handleCambiarModoDestino('original')}
-                />
-                Misma carpeta del archivo cargado
-              </label>
-            </HoverTooltip>
-          </div>
-        </div>
-
-        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
-          <button
-            onClick={() => {
-              if (historialBD.length > 0) {
-                handleAbrirRevisor(historialBD[0].fileName, historialBD[0].id, historialBD[0].audioBlobUrl, historialBD[0].rawSegments);
-              } else {
-                alert(
-                  'No hay expedientes en el Módulo Pericial Forense.\n\nPara comenzar, realiza una transcripción en la pantalla principal o carga un archivo sonoro.\n\nPuedes consultar el Tutorial interactivo para ver ejemplos guiados de uso.'
-                );
-              }
-            }}
-            className="top-control-btn"
-            style={{
-              backgroundColor: 'rgba(255, 255, 255, 0.06)',
-              color: '#FFFFFF',
-              border: '1px solid rgba(255, 255, 255, 0.35)',
-              borderRadius: THEME_TOKENS.radii.sm,
-              fontSize: '0.8125rem',
-              fontWeight: 500,
-              cursor: 'pointer',
-              whiteSpace: 'nowrap',
-              padding: '0.5rem 1rem',
-              transition: `all ${THEME_TOKENS.transitions.fast}`,
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.15)';
-              e.currentTarget.style.borderColor = '#FFFFFF';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.06)';
-              e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.35)';
-            }}
-            title="Accede al subsistema pericial forense para auditar evidencias, identificar interlocutores, validar hashes y emitir dictámenes certificados"
-          >
-            ⚖️ Módulo Pericial Forense
-          </button>
-
-          <button
-            onClick={() => setMostrarHistorialBD(!mostrarHistorialBD)}
-            className="top-control-btn"
-            style={{
-              backgroundColor: mostrarHistorialBD ? 'rgba(255, 255, 255, 0.2)' : 'rgba(255, 255, 255, 0.06)',
-              color: '#FFFFFF',
-              border: `1px solid ${mostrarHistorialBD ? '#FFFFFF' : 'rgba(255, 255, 255, 0.35)'}`,
-              borderRadius: THEME_TOKENS.radii.sm,
-              fontSize: '0.8125rem',
-              fontWeight: 500,
-              cursor: 'pointer',
-              whiteSpace: 'nowrap',
-              padding: '0.5rem 1rem',
-              transition: `all ${THEME_TOKENS.transitions.fast}`,
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.22)';
-              e.currentTarget.style.borderColor = '#FFFFFF';
-            }}
-            onMouseLeave={(e) => {
-              if (!mostrarHistorialBD) {
-                e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.06)';
-                e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.35)';
-              }
-            }}
-          >
-            🗄️ Ver base de datos ({historialBD.length})
-          </button>
-
-          <button
-            onClick={handleRestablecerTodoACero}
-            className="top-control-btn"
-            style={{
-              backgroundColor: 'rgba(239, 68, 68, 0.12)',
-              color: '#fca5a5',
-              border: '1px solid rgba(239, 68, 68, 0.35)',
-              borderRadius: THEME_TOKENS.radii.sm,
-              fontSize: '0.8125rem',
-              fontWeight: 500,
-              cursor: 'pointer',
-              whiteSpace: 'nowrap',
-              padding: '0.5rem 1rem',
-              transition: `all ${THEME_TOKENS.transitions.fast}`,
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.backgroundColor = 'rgba(239, 68, 68, 0.25)';
-              e.currentTarget.style.borderColor = '#ef4444';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = 'rgba(239, 68, 68, 0.12)';
-              e.currentTarget.style.borderColor = 'rgba(239, 68, 68, 0.35)';
-            }}
-            title="Vaciar completamente la base de datos y restablecer la aplicación a cero datos"
-          >
-            🧹 Limpiar todo a cero
-          </button>
-        </div>
-      </div>
-
-      {/* Superficie de Trabajo Editorial (Mobile First) */}
-      <div
-        className="work-surface"
-        style={{
-          backgroundColor: THEME_TOKENS.colors.surfaceBase,
-          border: `1px solid ${THEME_TOKENS.colors.borderSubtle}`,
-          boxShadow: THEME_TOKENS.shadows.sm,
-        }}
-      >
-        <div className="work-surface-header">
-          <h2 style={{ margin: 0, color: THEME_TOKENS.colors.textPrimary, fontSize: '1.25rem', fontFamily: THEME_TOKENS.fonts.serif, fontWeight: 600 }}>
-            Configuración de Expediente y Transcripción
-          </h2>
-          <span style={{ fontSize: '0.75rem', color: THEME_TOKENS.colors.textMuted, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-            Sesión Segura &middot; Procesamiento Local
-          </span>
-        </div>
-
-        {/* ── Contenedor Principal — dos columnas ────────────────────────────────── */}
-        <div
-          className="two-col-config-grid"
-          style={{
-            display: 'grid',
-            gridTemplateColumns: '1fr 1fr',
-            gap: '1.5rem',
-            marginBottom: '1.75rem',
-          }}
-        >
-
-          {/* ═══ COLUMNA IZQUIERDA: Pasos 1 y 2 ══════════════════════════════════ */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '1.75rem' }}>
-
-            {/* 1. Selección de Archivos */}
-            <div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
-                <label style={{ fontWeight: 600, color: THEME_TOKENS.colors.textPrimary, fontSize: '0.875rem' }}>
-                  1. Documentos de audio o video a procesar
-                </label>
-                <InfoHelpButton
-                  tooltip="Arrastra o examina archivos de audio o video (.mp3, .wav, .m4a, .mp4, etc.). El nombre de tus archivos de origen se preservará idéntico en todas las salidas generadas."
-                  onClick={() => {
-                    setSeccionAyudaInicial('general');
-                    setModalAyudaAbierto(true);
-                  }}
-                />
-              </div>
-              <div
-                style={{
-                  border: `1px dashed ${THEME_TOKENS.colors.borderStrong}`,
-                  borderRadius: THEME_TOKENS.radii.sm,
-                  backgroundColor: THEME_TOKENS.colors.bgCanvas,
-                  padding: '1.75rem 1.25rem',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  textAlign: 'center',
-                }}
-              >
-                <div
-                  className="examine-btn-container"
-                  style={{
-                    display: 'flex',
-                    flexDirection: 'column',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    textAlign: 'center',
-                    margin: '0.5rem auto',
-                    width: '100%',
-                  }}
-                >
-                  <HoverTooltip content="Abre el selector de archivos para agregar audios o videos a la cola">
-                    <button
-                      type="button"
-                      onClick={handleExaminarArchivos}
-                      disabled={isRunning}
-                      className="examine-btn"
-                      style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        margin: '0 auto',
-                        textAlign: 'center',
-                        gap: '0.6rem',
-                        padding: '0.75rem 2rem',
-                        cursor: isRunning ? 'not-allowed' : 'pointer',
-                        backgroundColor: THEME_TOKENS.colors.surfaceBase,
-                        border: `1px solid ${THEME_TOKENS.colors.borderStrong}`,
-                        borderRadius: THEME_TOKENS.radii.sm,
-                        color: THEME_TOKENS.colors.textPrimary,
-                        fontSize: '0.875rem',
-                        fontWeight: 600,
-                      }}
-                    >
-                      <span>📁</span> Examinar archivos de audio o video
-                    </button>
-                  </HoverTooltip>
-                  <input
-                    id="sephent-input-archivos"
-                    type="file"
-                    multiple
-                    accept="audio/*,video/*"
-                    onChange={handleFileChange}
-                    disabled={isRunning}
-                    style={{ display: 'none' }}
-                  />
-                  <span style={{ fontSize: '0.75rem', color: THEME_TOKENS.colors.textMuted, marginTop: '0.55rem', textAlign: 'center', display: 'block' }}>
-                    Formatos compatibles: WAV, MP3, M4A, FLAC, MP4, MKV, MOV (puedes arrastrar archivos o examinar varias veces)
-                  </span>
-                </div>
-
-                {/* Cola de archivos */}
-                {files.length > 0 && (
-                  <div className="file-queue-container">
-                    <div className="file-queue-header">
-                      <span>Archivos en cola para transcripción ({files.length})</span>
-                      <button
-                        type="button"
-                        onClick={handleLimpiarCola}
-                        disabled={isRunning}
-                        style={{
-                          background: 'transparent',
-                          border: 'none',
-                          color: THEME_TOKENS.colors.textMuted,
-                          fontSize: '0.75rem',
-                          cursor: 'pointer',
-                          textDecoration: 'underline',
-                        }}
-                      >
-                        Vaciar cola
-                      </button>
-                    </div>
-
-                    {files.map((file, idx) => {
-                      const esVideo = esArchivoVideo(file);
-                      return (
-                        <div key={`${file.name}_${idx}`} className="file-queue-item">
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flex: 1, minWidth: 0 }}>
-                            <span className={esVideo ? 'file-badge-video' : 'file-badge-audio'}>
-                              {esVideo ? '🎬 Video' : '🎵 Audio'}
-                            </span>
-                            <span className="file-name-truncate" title={file.name}>
-                              {file.name}
-                            </span>
-                            <span style={{ fontSize: '0.725rem', color: THEME_TOKENS.colors.textMuted, flexShrink: 0 }}>
-                              ({formatearTamano(file.size)})
-                            </span>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => handleRetirarArchivo(idx)}
-                            disabled={isRunning}
-                            className="file-remove-btn"
-                            title={`Retirar "${file.name}" de la cola`}
-                          >
-                            ✕
-                          </button>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            </div>{/* /Paso 1 */}
-
-            {/* 2. Selector de Modelo Whisper */}
-            <div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem', flexWrap: 'wrap', gap: '0.25rem' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  <label style={{ fontWeight: 600, color: THEME_TOKENS.colors.textPrimary, fontSize: '0.875rem' }}>
-                    2. Modelo OpenAI Whisper
-                  </label>
-                  <InfoHelpButton
-                    tooltip="Modelos de IA: Tiny y Base son muy rápidos para pruebas; Small y Medium otorgan un gran equilibrio profesional pericial; Large otorga la máxima fidelidad forense."
-                    onClick={() => {
-                      setSeccionAyudaInicial('modelos');
-                      setModalAyudaAbierto(true);
-                    }}
-                  />
-                </div>
-                <span
-                  style={{
-                    fontSize: '0.7rem',
-                    fontWeight: 600,
-                    letterSpacing: '0.03em',
-                    color: modeloDisponibleLocalmente ? THEME_TOKENS.colors.stateSuccess : THEME_TOKENS.colors.stateWarning,
-                    backgroundColor: modeloDisponibleLocalmente ? THEME_TOKENS.colors.stateSuccessBg : THEME_TOKENS.colors.stateWarningBg,
-                    border: `1px solid ${modeloDisponibleLocalmente ? THEME_TOKENS.colors.stateSuccessBorder : THEME_TOKENS.colors.stateWarningBorder}`,
-                    padding: '0.15rem 0.55rem',
-                    borderRadius: THEME_TOKENS.radii.xs,
-                  }}
-                >
-                  {modeloDisponibleLocalmente ? '✓ Disponible' : '⚠️ No descargado'}
-                </span>
-              </div>
-              <HoverTooltip content={`Modelo activo: ${WHISPER_MODELS[model]?.nombreVisible}. ${WHISPER_MODELS[model]?.descripcion}`} maxWidth="340px">
-                <select
-                  value={model}
-                  onChange={handleCambioModelo}
-                  disabled={isRunning}
-                  style={{
-                    width: '100%',
-                    padding: '0.65rem 0.85rem',
-                    borderRadius: THEME_TOKENS.radii.sm,
-                    border: `1px solid ${THEME_TOKENS.colors.borderStrong}`,
-                    fontSize: '0.875rem',
-                    backgroundColor: THEME_TOKENS.colors.surfaceBase,
-                    color: THEME_TOKENS.colors.textPrimary,
-                    fontFamily: THEME_TOKENS.fonts.sans,
-                    outline: 'none',
-                    transition: `border-color ${THEME_TOKENS.transitions.fast}`,
-                  }}
-                  onFocus={(e) => (e.currentTarget.style.borderColor = THEME_TOKENS.colors.borderFocus)}
-                  onBlur={(e) => (e.currentTarget.style.borderColor = THEME_TOKENS.colors.borderStrong)}
-                >
-                  {Object.entries(WHISPER_MODELS).map(([key, cfg]) => (
-                    <option key={key} value={key}>
-                      {cfg.nombreVisible} — Archivo: {cfg.nombreArchivo} ({cfg.tamanoAproximadoMB} MB)
-                    </option>
-                  ))}
-                </select>
-              </HoverTooltip>
-              <span style={{ fontSize: '0.775rem', color: THEME_TOKENS.colors.textSecondary, marginTop: '0.35rem', display: 'block' }}>
-                {WHISPER_MODELS[model]?.descripcion}
-              </span>
-            </div>{/* /Paso 2 */}
-
-          </div>{/* /COLUMNA IZQUIERDA */}
-
-          {/* ═══ COLUMNA DERECHA: Pasos 3, 4 (diarización prominente) y 5 ════════ */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '1.75rem' }}>
-
-            {/* 3. Selector de Idioma */}
-            <div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
-                <label style={{ fontWeight: 600, color: THEME_TOKENS.colors.textPrimary, fontSize: '0.875rem' }}>
-                  3. Idioma del registro sonoro
-                </label>
-                <InfoHelpButton
-                  tooltip="Permite que el modelo detecte automáticamente el idioma o fija Español/Inglés para máxima precisión y evitar traducciones involuntarias."
-                />
-              </div>
-              <HoverTooltip content="Configura el idioma de transcripción: detección automática o forzado en un idioma específico" maxWidth="320px">
+              <HoverTooltip content="Permite que el modelo detecte automáticamente el idioma o fija Español/Inglés para máxima fidelidad." maxWidth="300px">
                 <select
                   value={language}
                   onChange={(e) => {
@@ -1278,19 +787,17 @@ export default function ClassicTranscriptionView(): React.ReactElement {
                   disabled={isRunning}
                   style={{
                     width: '100%',
-                    padding: '0.65rem 0.85rem',
+                    padding: '0.55rem 0.75rem',
                     borderRadius: THEME_TOKENS.radii.sm,
                     border: `1px solid ${THEME_TOKENS.colors.borderStrong}`,
-                    fontSize: '0.875rem',
+                    fontSize: '0.825rem',
                     backgroundColor: THEME_TOKENS.colors.surfaceBase,
                     color: THEME_TOKENS.colors.textPrimary,
                     fontFamily: THEME_TOKENS.fonts.sans,
                     outline: 'none',
                   }}
-                  onFocus={(e) => (e.currentTarget.style.borderColor = THEME_TOKENS.colors.borderFocus)}
-                  onBlur={(e) => (e.currentTarget.style.borderColor = THEME_TOKENS.colors.borderStrong)}
                 >
-                  <option value="auto">🌐 Detección automática de idioma</option>
+                  <option value="auto">🌐 Detección automática</option>
                   <option value="es">Español (Castellano)</option>
                   <option value="en">Inglés (English)</option>
                   <option value="fr">Francés (Français)</option>
@@ -1300,177 +807,114 @@ export default function ClassicTranscriptionView(): React.ReactElement {
                   <option value="zh">Chino (Mandarin)</option>
                 </select>
               </HoverTooltip>
-            </div>{/* /Paso 3 */}
+            </div>
 
-            {/* 4. Diarización — control prominente y alternante (por defecto activo) */}
-            <div
-              style={{
-                backgroundColor: diarizarHablantes ? THEME_TOKENS.colors.stateSuccessBg : THEME_TOKENS.colors.bgSecondary,
-                border: `1px solid ${diarizarHablantes ? THEME_TOKENS.colors.stateSuccessBorder : THEME_TOKENS.colors.borderStrong}`,
-                borderRadius: THEME_TOKENS.radii.md,
-                padding: '1rem 1.1rem',
-                transition: `all ${THEME_TOKENS.transitions.fast}`,
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.65rem' }}>
-                <label style={{ fontWeight: 700, color: THEME_TOKENS.colors.textPrimary, fontSize: '0.875rem' }}>
-                  4. Identificación de hablantes (Diarización)
+            {/* 1.2 Diarización (activa por defecto) */}
+            <div style={{ marginBottom: '1.25rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.35rem' }}>
+                <label style={{ fontSize: '0.8rem', fontWeight: 600, color: THEME_TOKENS.colors.textPrimary }}>
+                  Identificación de hablantes
                 </label>
-                <InfoHelpButton
-                  tooltip="Activa la separación e identificación de interlocutores (Persona 1, Persona 2, etc.) mediante pyannote.audio y análisis espectral. Si se desactiva, se realiza una transcripción continua de alta velocidad sin segmentar por hablantes."
-                />
+                <span
+                  style={{
+                    fontSize: '0.65rem',
+                    fontWeight: 700,
+                    color: diarizarHablantes ? '#15803d' : '#64748b',
+                    backgroundColor: diarizarHablantes ? '#f0fdf4' : '#f1f5f9',
+                    padding: '0.1rem 0.35rem',
+                    borderRadius: '3px',
+                  }}
+                >
+                  {diarizarHablantes ? 'Por defecto' : 'Simple'}
+                </span>
               </div>
-              {/* Toggle switch visual pill */}
-              <HoverTooltip content="Activa o desactiva la diarización. Al desactivarla, se genera una transcripción continua sin discriminación de hablantes." maxWidth="350px">
+              <HoverTooltip content="Activa o desactiva la separación e identificación de interlocutores. Por defecto se encuentra activa." maxWidth="320px">
                 <label
                   style={{
                     display: 'flex',
                     alignItems: 'center',
-                    gap: '0.85rem',
+                    gap: '0.75rem',
                     cursor: isRunning ? 'not-allowed' : 'pointer',
                     userSelect: 'none',
+                    padding: '0.65rem 0.75rem',
+                    borderRadius: THEME_TOKENS.radii.sm,
+                    backgroundColor: diarizarHablantes ? THEME_TOKENS.colors.stateSuccessBg : THEME_TOKENS.colors.bgSecondary,
+                    border: `1px solid ${diarizarHablantes ? THEME_TOKENS.colors.stateSuccessBorder : THEME_TOKENS.colors.borderSubtle}`,
+                    transition: 'all 0.15s ease',
                   }}
                 >
-                  {/* Pista del toggle */}
-                  <span style={{ position: 'relative', display: 'inline-block', width: '44px', height: '24px', flexShrink: 0 }}>
-                    <input
-                      type="checkbox"
-                      checked={diarizarHablantes}
-                      onChange={(e) => {
-                        setDiarizarHablantes(e.target.checked);
-                        UserSettingsService.guardarConfiguracion({ diarizarHablantes: e.target.checked });
-                      }}
-                      disabled={isRunning}
-                      style={{ opacity: 0, width: 0, height: 0, position: 'absolute' }}
-                    />
-                    <span
-                      style={{
-                        position: 'absolute',
-                        inset: 0,
-                        borderRadius: '12px',
-                        backgroundColor: diarizarHablantes ? THEME_TOKENS.colors.stateSuccess : THEME_TOKENS.colors.borderStrong,
-                        transition: `background-color ${THEME_TOKENS.transitions.fast}`,
-                        cursor: isRunning ? 'not-allowed' : 'pointer',
-                      }}
-                    />
-                    <span
-                      style={{
-                        position: 'absolute',
-                        top: '3px',
-                        left: diarizarHablantes ? '23px' : '3px',
-                        width: '18px',
-                        height: '18px',
-                        borderRadius: '50%',
-                        backgroundColor: THEME_TOKENS.colors.surfaceBase,
-                        boxShadow: THEME_TOKENS.shadows.sm,
-                        transition: `left ${THEME_TOKENS.transitions.fast}`,
-                        pointerEvents: 'none',
-                      }}
-                    />
-                  </span>
-                  {/* Etiqueta descriptiva */}
-                  <span>
-                    <strong style={{ fontSize: '0.875rem', color: THEME_TOKENS.colors.textPrimary }}>
+                  <input
+                    type="checkbox"
+                    checked={diarizarHablantes}
+                    onChange={(e) => {
+                      setDiarizarHablantes(e.target.checked);
+                      UserSettingsService.guardarConfiguracion({ diarizarHablantes: e.target.checked });
+                    }}
+                    disabled={isRunning}
+                    style={{ accentColor: THEME_TOKENS.colors.stateSuccess }}
+                  />
+                  <div>
+                    <strong style={{ fontSize: '0.825rem', color: THEME_TOKENS.colors.textPrimary, display: 'block' }}>
                       {diarizarHablantes ? '👥 Diarización activa' : '📄 Transcripción continua'}
                     </strong>
-                    <span style={{ display: 'block', fontSize: '0.775rem', color: THEME_TOKENS.colors.textSecondary, marginTop: '0.15rem' }}>
-                      {diarizarHablantes
-                        ? 'Identificación y separación de interlocutores activada'
-                        : 'Sin diarización ni separación de voces'}
+                    <span style={{ fontSize: '0.725rem', color: THEME_TOKENS.colors.textSecondary }}>
+                      {diarizarHablantes ? 'Discrimina y rotula cada voz' : 'Audio continuo sin turnos'}
                     </span>
-                  </span>
-                </label>
-              </HoverTooltip>
-            </div>{/* /Paso 4 */}
-
-            {/* 4.1. Protección Anti-truncamiento para archivos largos */}
-            <div
-              style={{
-                backgroundColor: evitarTruncamiento ? 'rgba(59, 130, 246, 0.08)' : THEME_TOKENS.colors.bgSecondary,
-                border: `1px solid ${evitarTruncamiento ? 'rgba(59, 130, 246, 0.35)' : THEME_TOKENS.colors.borderStrong}`,
-                borderRadius: THEME_TOKENS.radii.md,
-                padding: '0.85rem 1.1rem',
-                marginTop: '0.65rem',
-                transition: `all ${THEME_TOKENS.transitions.fast}`,
-              }}
-            >
-              <HoverTooltip content="Previene el recorte prematuro y los bucles de silencio en grabaciones de más de 10 minutos o varias horas de duración. Aplica decodificación por ventanas independientes y rescate automático de cola." maxWidth="380px">
-                <label
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.85rem',
-                    cursor: isRunning ? 'not-allowed' : 'pointer',
-                    userSelect: 'none',
-                  }}
-                >
-                  <span style={{ position: 'relative', display: 'inline-block', width: '44px', height: '24px', flexShrink: 0 }}>
-                    <input
-                      type="checkbox"
-                      checked={evitarTruncamiento}
-                      onChange={(e) => {
-                        setEvitarTruncamiento(e.target.checked);
-                        UserSettingsService.guardarConfiguracion({ evitarTruncamiento: e.target.checked });
-                      }}
-                      disabled={isRunning}
-                      style={{ opacity: 0, width: 0, height: 0, position: 'absolute' }}
-                    />
-                    <span
-                      style={{
-                        position: 'absolute',
-                        inset: 0,
-                        borderRadius: '12px',
-                        backgroundColor: evitarTruncamiento ? '#2563eb' : THEME_TOKENS.colors.borderStrong,
-                        transition: `background-color ${THEME_TOKENS.transitions.fast}`,
-                        cursor: isRunning ? 'not-allowed' : 'pointer',
-                      }}
-                    />
-                    <span
-                      style={{
-                        position: 'absolute',
-                        top: '3px',
-                        left: evitarTruncamiento ? '23px' : '3px',
-                        width: '18px',
-                        height: '18px',
-                        borderRadius: '50%',
-                        backgroundColor: THEME_TOKENS.colors.surfaceBase,
-                        boxShadow: THEME_TOKENS.shadows.sm,
-                        transition: `left ${THEME_TOKENS.transitions.fast}`,
-                        pointerEvents: 'none',
-                      }}
-                    />
-                  </span>
-                  <span>
-                    <strong style={{ fontSize: '0.875rem', color: THEME_TOKENS.colors.textPrimary }}>
-                      {evitarTruncamiento ? '🛡️ Protección Anti-truncamiento activa' : '⚪ Modo estándar (sin blindaje de cola)'}
-                    </strong>
-                    <span style={{ display: 'block', fontSize: '0.775rem', color: THEME_TOKENS.colors.textSecondary, marginTop: '0.15rem' }}>
-                      {evitarTruncamiento
-                        ? 'Garantiza cobertura íntegra del 100% en grabaciones largas (>10 min y multi-hora)'
-                        : 'Decodificación Whisper estándar sin rescate de cola acústica'}
-                    </span>
-                  </span>
+                  </div>
                 </label>
               </HoverTooltip>
             </div>
 
-            {/* 5. Opciones de Salida Documental */}
-            <div style={{ paddingTop: '0.5rem', borderTop: `1px solid ${THEME_TOKENS.colors.borderSubtle}` }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', margin: '0.85rem 0 0.6rem 0' }}>
-                <strong style={{ color: THEME_TOKENS.colors.textPrimary, fontSize: '0.875rem' }}>
-                  5. Formatos y actas de salida requeridas:
-                </strong>
-                <InfoHelpButton
-                  tooltip="Selecciona qué actas deseas emitir. Cada archivo generado preservará exactamente el nombre de tu archivo de origen cambiando solo la extensión."
-                  onClick={() => {
-                    setSeccionAyudaInicial('formatos');
-                    setModalAyudaAbierto(true);
+            {/* 1.3 Blindaje Anti-truncamiento */}
+            <div style={{ marginBottom: '1.25rem' }}>
+              <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: THEME_TOKENS.colors.textPrimary, marginBottom: '0.35rem' }}>
+                Protección contra truncamiento
+              </label>
+              <HoverTooltip content="Garantiza cobertura íntegra en grabaciones de más de 10 min o varias horas, rescatando colas acústicas." maxWidth="320px">
+                <label
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.75rem',
+                    cursor: isRunning ? 'not-allowed' : 'pointer',
+                    userSelect: 'none',
+                    padding: '0.65rem 0.75rem',
+                    borderRadius: THEME_TOKENS.radii.sm,
+                    backgroundColor: evitarTruncamiento ? 'rgba(59, 130, 246, 0.08)' : THEME_TOKENS.colors.bgSecondary,
+                    border: `1px solid ${evitarTruncamiento ? 'rgba(59, 130, 246, 0.35)' : THEME_TOKENS.colors.borderSubtle}`,
+                    transition: 'all 0.15s ease',
                   }}
-                />
-              </div>
-              <div className="output-formats-group">
-                <HoverTooltip content="Genera acta de transcripción literal (.txt) estructurada con encabezados, metadatos y turnos por interlocutor">
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', fontSize: '0.85rem', color: THEME_TOKENS.colors.textPrimary }}>
+                >
+                  <input
+                    type="checkbox"
+                    checked={evitarTruncamiento}
+                    onChange={(e) => {
+                      setEvitarTruncamiento(e.target.checked);
+                      UserSettingsService.guardarConfiguracion({ evitarTruncamiento: e.target.checked });
+                    }}
+                    disabled={isRunning}
+                    style={{ accentColor: '#2563eb' }}
+                  />
+                  <div>
+                    <strong style={{ fontSize: '0.825rem', color: THEME_TOKENS.colors.textPrimary, display: 'block' }}>
+                      {evitarTruncamiento ? '🛡️ Blindaje activo' : '⚪ Modo estándar'}
+                    </strong>
+                    <span style={{ fontSize: '0.725rem', color: THEME_TOKENS.colors.textSecondary }}>
+                      {evitarTruncamiento ? 'Audios largos (>10m) protegidos' : 'Sin rescate de cola'}
+                    </span>
+                  </div>
+                </label>
+              </HoverTooltip>
+            </div>
+
+            {/* 1.4 Formatos de Salida */}
+            <div style={{ marginBottom: '1.25rem' }}>
+              <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: THEME_TOKENS.colors.textPrimary, marginBottom: '0.45rem' }}>
+                Formatos de salida
+              </label>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                <HoverTooltip content="Acta de transcripción literal en texto estructurado con turnos por interlocutor.">
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.8rem', cursor: 'pointer', color: THEME_TOKENS.colors.textPrimary }}>
                     <input
                       type="checkbox"
                       checked={outputTxt}
@@ -1479,14 +923,13 @@ export default function ClassicTranscriptionView(): React.ReactElement {
                         UserSettingsService.guardarConfiguracion({ outputTxt: e.target.checked });
                       }}
                       disabled={isRunning}
-                      style={{ accentColor: THEME_TOKENS.colors.surfaceDark }}
                     />
-                    <span>Transcripción literal (<code>.txt</code>)</span>
+                    <span>Texto literal (<code>.txt</code>)</span>
                   </label>
                 </HoverTooltip>
 
-                <HoverTooltip content="Genera subtítulos periciales (.srt) con marcas de tiempo canónicas compatibles con reproductores de video">
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', fontSize: '0.85rem', color: THEME_TOKENS.colors.textPrimary }}>
+                <HoverTooltip content="Subtítulos temporizados periciales con marcas de tiempo canónicas.">
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.8rem', cursor: 'pointer', color: THEME_TOKENS.colors.textPrimary }}>
                     <input
                       type="checkbox"
                       checked={outputSrt}
@@ -1495,14 +938,13 @@ export default function ClassicTranscriptionView(): React.ReactElement {
                         UserSettingsService.guardarConfiguracion({ outputSrt: e.target.checked });
                       }}
                       disabled={isRunning}
-                      style={{ accentColor: THEME_TOKENS.colors.surfaceDark }}
                     />
-                    <span>Subtítulos temporizados periciales (<code>.srt</code>)</span>
+                    <span>Subtítulos temporizados (<code>.srt</code>)</span>
                   </label>
                 </HoverTooltip>
 
-                <HoverTooltip content="Conserva o genera el archivo de video procesado (.mp4) con su meta-imagen">
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', fontSize: '0.85rem', color: THEME_TOKENS.colors.textPrimary }}>
+                <HoverTooltip content="Genera o conserva el video con su meta-imagen pericial.">
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.8rem', cursor: 'pointer', color: THEME_TOKENS.colors.textPrimary }}>
                     <input
                       type="checkbox"
                       checked={outputVideo}
@@ -1511,200 +953,582 @@ export default function ClassicTranscriptionView(): React.ReactElement {
                         UserSettingsService.guardarConfiguracion({ outputVideo: e.target.checked });
                       }}
                       disabled={isRunning}
-                      style={{ accentColor: THEME_TOKENS.colors.surfaceDark }}
                     />
-                    <span>Video generado con meta‑imagen (<code>.mp4</code>)</span>
+                    <span>Video con meta‑imagen (<code>.mp4</code>)</span>
                   </label>
                 </HoverTooltip>
               </div>
-            </div>{/* /Paso 5 */}
+            </div>
 
-          </div>{/* /COLUMNA DERECHA */}
+            {/* 1.5 Carpeta de Destino */}
+            <div>
+              <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: THEME_TOKENS.colors.textPrimary, marginBottom: '0.45rem' }}>
+                Carpeta de guardado
+              </label>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', marginBottom: '0.4rem' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.785rem', cursor: 'pointer' }}>
+                  <input
+                    type="radio"
+                    name="modoDestinoSalidaSidebar"
+                    value="default"
+                    checked={modoDestino === 'default'}
+                    onChange={() => handleCambiarModoDestino('default')}
+                  />
+                  Ruta oficial por defecto
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.785rem', cursor: 'pointer' }}>
+                  <input
+                    type="radio"
+                    name="modoDestinoSalidaSidebar"
+                    value="original"
+                    checked={modoDestino === 'original'}
+                    onChange={() => handleCambiarModoDestino('original')}
+                  />
+                  Misma carpeta del archivo
+                </label>
+              </div>
+              <p style={{ fontFamily: THEME_TOKENS.fonts.mono, fontSize: '0.725rem', color: THEME_TOKENS.colors.textMuted, margin: 0, wordBreak: 'break-all' }}>
+                {modoDestino === 'default'
+                  ? OutputPathService.obtenerRutaPorDefecto()
+                  : 'Carpeta contenedora del archivo cargado'}
+              </p>
+            </div>
+          </div>
 
-        </div>{/* /Contenedor Principal dos columnas */}
+          {/* 2. Tarjeta: Sistema y Modelos */}
+          <div className="dashboard-sidebar-card">
+            <div className="dashboard-sidebar-title">
+              <span>💻 Sistema & Modelos</span>
+            </div>
+            <p style={{ fontSize: '0.75rem', color: THEME_TOKENS.colors.textSecondary, marginBottom: '0.35rem' }}>
+              Ruta oficial Whisper en el equipo:
+            </p>
+            <p style={{ fontFamily: THEME_TOKENS.fonts.mono, fontSize: '0.725rem', color: THEME_TOKENS.colors.textMuted, wordBreak: 'break-all', marginBottom: '0.85rem' }}>
+              {rutaOficialTexto || 'Detectando ruta oficial...'}
+            </p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              <button
+                type="button"
+                onClick={() => setModalModelosAbierto(true)}
+                style={{
+                  width: '100%',
+                  padding: '0.5rem 0.75rem',
+                  fontSize: '0.8125rem',
+                  fontWeight: 600,
+                  backgroundColor: THEME_TOKENS.colors.bgSecondary,
+                  border: `1px solid ${THEME_TOKENS.colors.borderStrong}`,
+                  borderRadius: THEME_TOKENS.radii.sm,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '0.4rem',
+                }}
+              >
+                ⚙️ Gestionar modelos
+              </button>
+              <button
+                type="button"
+                onClick={handleAbrirCarpetaLogs}
+                style={{
+                  width: '100%',
+                  padding: '0.5rem 0.75rem',
+                  fontSize: '0.8125rem',
+                  fontWeight: 600,
+                  backgroundColor: THEME_TOKENS.colors.bgSecondary,
+                  border: `1px solid ${THEME_TOKENS.colors.borderStrong}`,
+                  borderRadius: THEME_TOKENS.radii.sm,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '0.4rem',
+                }}
+              >
+                📋 Logs de errores
+              </button>
+            </div>
+          </div>
 
-        {/* ── Fila de acción: Iniciar Transcripción + Apoyar Desarrollo ─────────── */}
-        <div
-          className="btn-primary-container"
-          style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.75rem', flexWrap: 'wrap' }}
-        >
-          <HoverTooltip content={isRunning ? 'Procesando archivos...' : 'Inicia la decodificación acústica, VAD, identificación de hablantes y generación de archivos'}>
-            <button
-              onClick={startTranscription}
-              disabled={isRunning}
-              onMouseEnter={() => setBotonHovered(true)}
-              onMouseLeave={() => setBotonHovered(false)}
-              className="btn-primary-action"
-              style={{
-                padding: '0.85rem 2.5rem',
-                backgroundColor: isRunning
-                  ? THEME_TOKENS.colors.borderStrong
-                  : botonHovered
-                  ? THEME_TOKENS.colors.accentHover
-                  : THEME_TOKENS.colors.accentPrimary,
-                color: THEME_TOKENS.colors.textOnDark,
-                border: `1px solid ${THEME_TOKENS.colors.borderDark}`,
-                borderRadius: THEME_TOKENS.radii.sm,
-                fontSize: '0.95rem',
-                fontFamily: THEME_TOKENS.fonts.sans,
-                fontWeight: 600,
-                letterSpacing: '0.02em',
-                cursor: isRunning ? 'not-allowed' : 'pointer',
-                boxShadow: botonHovered ? THEME_TOKENS.shadows.md : THEME_TOKENS.shadows.sm,
-                transform: botonHovered && !isRunning ? 'translateY(-1px)' : 'none',
-                transition: `all ${THEME_TOKENS.transitions.fast}`,
+          {/* 3. Tarjeta: Funcionalidad Pericial Forense (Aislada vía DI) */}
+          <div
+            className="dashboard-sidebar-card"
+            style={{
+              borderLeft: '4px solid #D4AF37',
+              backgroundColor: THEME_TOKENS.colors.surfaceBase,
+            }}
+          >
+            <div className="dashboard-sidebar-title">
+              <span style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                <span>⚖️</span> Pericial Forense (Aislado)
+              </span>
+              <InfoHelpButton
+                tooltip="Módulo judicial desacoplado bajo Dependency Injection (IPericialService). Permite cotejo pericial de interlocutores, validación de hashes criptográficos SHA-256 y emisión de dictámenes certificados sin interferir con la transcripción rápida."
+                onClick={() => {
+                  setSeccionAyudaInicial('forense');
+                  setModalAyudaAbierto(true);
+                }}
+              />
+            </div>
+            <p style={{ fontSize: '0.75rem', color: THEME_TOKENS.colors.textSecondary, marginBottom: '0.85rem', lineHeight: 1.4 }}>
+              Herramientas forenses aisladas bajo <code>IPericialService</code> para certificar actas judiciales y auditar evidencias.
+            </p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              <button
+                type="button"
+                onClick={() => {
+                  if (historialBD.length > 0) {
+                    handleAbrirRevisor(historialBD[0].fileName, historialBD[0].id, historialBD[0].audioBlobUrl, historialBD[0].rawSegments);
+                  } else {
+                    alert(
+                      'No hay expedientes en el Módulo Pericial Forense.\n\nPara comenzar, realiza una transcripción en el panel central o carga un archivo sonoro.\n\nPuedes consultar el tutorial interactivo para más detalles.'
+                    );
+                  }
+                }}
+                style={{
+                  width: '100%',
+                  padding: '0.55rem 0.75rem',
+                  fontSize: '0.8125rem',
+                  fontWeight: 600,
+                  backgroundColor: THEME_TOKENS.colors.surfaceDark,
+                  color: '#FFFFFF',
+                  border: 'none',
+                  borderRadius: THEME_TOKENS.radii.sm,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '0.4rem',
+                }}
+              >
+                ⚖️ Abrir Módulo Pericial
+              </button>
+              <button
+                type="button"
+                onClick={() => setMostrarHistorialBD(!mostrarHistorialBD)}
+                style={{
+                  width: '100%',
+                  padding: '0.5rem 0.75rem',
+                  fontSize: '0.8125rem',
+                  fontWeight: 500,
+                  backgroundColor: mostrarHistorialBD ? 'rgba(59, 130, 246, 0.1)' : THEME_TOKENS.colors.bgSecondary,
+                  border: `1px solid ${mostrarHistorialBD ? '#2563eb' : THEME_TOKENS.colors.borderSubtle}`,
+                  borderRadius: THEME_TOKENS.radii.sm,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '0.4rem',
+                }}
+              >
+                🗄️ Base de datos ({historialBD.length})
+              </button>
+              <button
+                type="button"
+                onClick={handleRestablecerTodoACero}
+                style={{
+                  width: '100%',
+                  padding: '0.45rem 0.75rem',
+                  fontSize: '0.775rem',
+                  fontWeight: 500,
+                  backgroundColor: 'rgba(239, 68, 68, 0.08)',
+                  color: '#DC2626',
+                  border: '1px solid rgba(239, 68, 68, 0.3)',
+                  borderRadius: THEME_TOKENS.radii.sm,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '0.4rem',
+                }}
+              >
+                🧹 Limpiar expedientes a cero
+              </button>
+            </div>
+          </div>
+        </aside>
+
+        {/* ═══ CUERPO DERECHO / CENTRAL: ACCIÓN PRINCIPAL ═══ */}
+        <main className="dashboard-main-column">
+
+          {/* 1. Zona de Drag & Drop y Selección Multimedia */}
+          <div className="dashboard-section-card">
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <strong style={{ fontSize: '0.95rem', color: THEME_TOKENS.colors.textPrimary, fontFamily: THEME_TOKENS.fonts.serif }}>
+                  1. Selección de Elementos Multimedia (Audio / Video)
+                </strong>
+                <InfoHelpButton
+                  tooltip="Arrastra o examina archivos de audio o video (.mp3, .wav, .m4a, .mp4, etc.). El nombre de tus archivos de origen se preservará idéntico en todas las salidas generadas."
+                  onClick={() => {
+                    setSeccionAyudaInicial('general');
+                    setModalAyudaAbierto(true);
+                  }}
+                />
+              </div>
+              {files.length > 0 && (
+                <span style={{ fontSize: '0.75rem', fontWeight: 600, color: THEME_TOKENS.colors.accentPrimary }}>
+                  {files.length} archivo{files.length > 1 ? 's' : ''} preparado{files.length > 1 ? 's' : ''}
+                </span>
+              )}
+            </div>
+
+            {/* Dropzone interactiva */}
+            <div
+              className={`dropzone-card ${isDragOver ? 'drag-over' : ''}`}
+              onDragOver={(e) => {
+                e.preventDefault();
+                setIsDragOver(true);
+              }}
+              onDragLeave={() => setIsDragOver(false)}
+              onDrop={(e) => {
+                e.preventDefault();
+                setIsDragOver(false);
+                if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                  const nuevos = Array.from(e.dataTransfer.files);
+                  setFiles((prev) => {
+                    const existentes = new Set(prev.map((f) => `${f.name}_${f.size}`));
+                    const filtrados = nuevos.filter((f) => !existentes.has(`${f.name}_${f.size}`));
+                    return [...prev, ...filtrados];
+                  });
+                }
               }}
             >
-              {isRunning ? '⏳ Procesando transcripción...' : '▶ Iniciar Transcripción'}
-            </button>
-          </HoverTooltip>
-          <DonateButton />
-        </div>
-
-        {/* Barra de progreso mejorada con % y tiempo estimado de completado (ETA) */}
-        {(isRunning || telemetriaActual.mensaje || statusMessage) && (
-          <TranscriptionProgressBar
-            porcentaje={isRunning ? telemetriaActual.porcentaje : (statusMessage.startsWith('❌') ? 0 : 100)}
-            etapaActual={telemetriaActual.etapaActual}
-            totalEtapas={telemetriaActual.totalEtapas}
-            mensaje={telemetriaActual.mensaje || statusMessage}
-            tiempoEstimadoSegundos={telemetriaActual.tiempoEstimadoSegundos}
-            velocidadFactor={telemetriaActual.velocidadFactor}
-            nombreArchivo={telemetriaActual.nombreArchivo}
-            enCancelar={handleCancelarTranscripcion}
-            cancelando={isCanceling}
-          />
-        )}
-
-        {/* Resultados Estilizados como Folios Documentales con Nombres Idénticos al Archivo Fuente */}
-        {transcriptionRecords.length > 0 && (
-          <div style={{ marginTop: '2.5rem', borderTop: `1px solid ${THEME_TOKENS.colors.borderSubtle}`, paddingTop: '1.75rem' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.5rem' }}>
-              <h3 style={{ margin: 0, color: THEME_TOKENS.colors.textPrimary, fontSize: '1.15rem', fontFamily: THEME_TOKENS.fonts.serif, fontWeight: 600 }}>
-                Expedientes Generados
-              </h3>
-              <span style={{ fontSize: '0.75rem', color: THEME_TOKENS.colors.textMuted }}>
-                Nomenclatura idéntica preservada por archivo cargado
+              <div style={{ fontSize: '2.5rem', marginBottom: '0.5rem', lineHeight: 1 }}>📁</div>
+              <p style={{ margin: '0 0 0.5rem 0', fontWeight: 600, color: THEME_TOKENS.colors.textPrimary, fontSize: '0.95rem' }}>
+                Arrastra y suelta tus archivos aquí
+              </p>
+              <p style={{ margin: '0 0 1.25rem 0', fontSize: '0.8rem', color: THEME_TOKENS.colors.textSecondary }}>
+                o utiliza el botón para buscar en tu equipo
+              </p>
+              <button
+                type="button"
+                onClick={handleExaminarArchivos}
+                disabled={isRunning}
+                className="examine-btn"
+              >
+                <span>📂</span> Examinar archivos de audio o video
+              </button>
+              <input
+                id="sephent-input-archivos"
+                type="file"
+                multiple
+                accept="audio/*,video/*"
+                onChange={handleFileChange}
+                disabled={isRunning}
+                style={{ display: 'none' }}
+              />
+              <span style={{ display: 'block', fontSize: '0.725rem', color: THEME_TOKENS.colors.textMuted, marginTop: '0.85rem' }}>
+                Formatos compatibles: WAV, MP3, M4A, FLAC, OGG, MP4, MKV, MOV, AVI
               </span>
             </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
-              {transcriptionRecords.map((record, idx) => (
-                <div
-                  key={idx}
-                  className="folio-record-item"
-                  style={{
-                    backgroundColor: THEME_TOKENS.colors.bgCanvas,
-                    border: `1px solid ${THEME_TOKENS.colors.borderSubtle}`,
-                    borderLeft: `3px solid ${THEME_TOKENS.colors.surfaceDark}`,
-                    borderRadius: THEME_TOKENS.radii.xs,
-                  }}
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.4rem' }}>
-                    <strong style={{ color: THEME_TOKENS.colors.textPrimary, fontSize: '0.9rem', wordBreak: 'break-all' }}>
-                      📄 Archivo de origen: {record.sourceFileName}
-                    </strong>
-                    <span style={{ fontFamily: THEME_TOKENS.fonts.mono, fontSize: '0.75rem', color: THEME_TOKENS.colors.textMuted }}>
-                      ID Base: [{record.baseName}]
-                    </span>
-                  </div>
+            {/* Cola de archivos seleccionados */}
+            {files.length > 0 && (
+              <div className="file-queue-container" style={{ marginTop: '1rem' }}>
+                <div className="file-queue-header">
+                  <span>Archivos en cola para transcripción ({files.length})</span>
+                  <button
+                    type="button"
+                    onClick={handleLimpiarCola}
+                    disabled={isRunning}
+                    style={{
+                      background: 'transparent',
+                      border: 'none',
+                      color: THEME_TOKENS.colors.textMuted,
+                      fontSize: '0.75rem',
+                      cursor: 'pointer',
+                      textDecoration: 'underline',
+                    }}
+                  >
+                    Vaciar cola
+                  </button>
+                </div>
 
-                  {/* Acciones documentales con nombres de salida idénticos */}
-                  <div className="folio-actions-container">
-                    {record.outputs.map((salida, sIdx) => (
-                      <a
-                        key={sIdx}
-                        href={salida.downloadUrl}
-                        download={salida.fileName}
-                        title={`Descargar ${salida.fileName}`}
+                {files.map((file, idx) => {
+                  const esVideo = esArchivoVideo(file);
+                  return (
+                    <div key={`${file.name}_${idx}`} className="file-queue-item">
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flex: 1, minWidth: 0 }}>
+                        <span className={esVideo ? 'file-badge-video' : 'file-badge-audio'}>
+                          {esVideo ? '🎬 Video' : '🎵 Audio'}
+                        </span>
+                        <span className="file-name-truncate" title={file.name}>
+                          {file.name}
+                        </span>
+                        <span style={{ fontSize: '0.725rem', color: THEME_TOKENS.colors.textMuted, flexShrink: 0 }}>
+                          ({formatearTamano(file.size)})
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleRetirarArchivo(idx)}
+                        disabled={isRunning}
+                        className="file-remove-btn"
+                        title={`Retirar "${file.name}" de la cola`}
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* 2. Selección del Modelo OpenAI Whisper */}
+          <div className="dashboard-section-card">
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.85rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <strong style={{ fontSize: '0.95rem', color: THEME_TOKENS.colors.textPrimary, fontFamily: THEME_TOKENS.fonts.serif }}>
+                  2. Selección del Modelo OpenAI Whisper
+                </strong>
+                <InfoHelpButton
+                  tooltip="Selecciona el modelo acústico: Turbo o Small ofrecen el mejor balance de velocidad y fidelidad pericial; Medium y Large ofrecen precisión máxima; Base y Tiny son para pruebas ultrarrápidas."
+                  onClick={() => {
+                    setSeccionAyudaInicial('modelos');
+                    setModalAyudaAbierto(true);
+                  }}
+                />
+              </div>
+              <span
+                style={{
+                  fontSize: '0.7rem',
+                  fontWeight: 600,
+                  color: modeloDisponibleLocalmente ? THEME_TOKENS.colors.stateSuccess : THEME_TOKENS.colors.stateWarning,
+                  backgroundColor: modeloDisponibleLocalmente ? THEME_TOKENS.colors.stateSuccessBg : THEME_TOKENS.colors.stateWarningBg,
+                  border: `1px solid ${modeloDisponibleLocalmente ? THEME_TOKENS.colors.stateSuccessBorder : THEME_TOKENS.colors.stateWarningBorder}`,
+                  padding: '0.15rem 0.55rem',
+                  borderRadius: THEME_TOKENS.radii.xs,
+                }}
+              >
+                {modeloDisponibleLocalmente ? `✓ Modelo "${model}" listo en equipo` : `⚠️ Modelo "${model}" requiere descarga`}
+              </span>
+            </div>
+
+            {/* Cuadrícula de tarjetas de modelo Whisper */}
+            <div className="model-card-grid">
+              {(Object.entries(WHISPER_MODELS) as [ModelKey, typeof WHISPER_MODELS[ModelKey]][]).map(([key, cfg]) => {
+                const isSelected = model === key;
+                const isLocal = ModelManager.isModelActive(key);
+                return (
+                  <div
+                    key={key}
+                    onClick={() => {
+                      if (!isRunning) {
+                        setModel(key);
+                        UserSettingsService.guardarConfiguracion({ modelo: key });
+                      }
+                    }}
+                    className={`model-card-selectable ${isSelected ? 'selected' : ''}`}
+                    style={{
+                      cursor: isRunning ? 'not-allowed' : 'pointer',
+                      opacity: isRunning ? 0.7 : 1,
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.35rem' }}>
+                      <strong style={{ fontSize: '0.875rem', color: THEME_TOKENS.colors.textPrimary }}>
+                        {cfg.nombreVisible}
+                      </strong>
+                      <span
                         style={{
-                          color: THEME_TOKENS.colors.textPrimary,
-                          textDecoration: 'none',
-                          fontSize: '0.825rem',
-                          fontWeight: 600,
-                          borderBottom: `1px solid ${THEME_TOKENS.colors.accentTaupe}`,
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '0.35rem',
-                          wordBreak: 'break-all',
+                          fontSize: '0.65rem',
+                          fontWeight: 700,
+                          color: isLocal ? '#15803d' : '#b45309',
+                          backgroundColor: isLocal ? '#f0fdf4' : '#fffbeb',
+                          border: `1px solid ${isLocal ? '#bbf7d0' : '#fde68a'}`,
+                          padding: '0.1rem 0.35rem',
+                          borderRadius: '3px',
+                          whiteSpace: 'nowrap',
                         }}
                       >
-                        <span>↓</span>
-                        <span>Descargar <code>{salida.fileName}</code></span>
-                        <span style={{ color: THEME_TOKENS.colors.textMuted, fontSize: '0.75rem', fontWeight: 400 }}>
-                          ({salida.formatId.toUpperCase()})
-                        </span>
-                      </a>
-                    ))}
-
-                    <button
-                      onClick={() => handleAbrirRevisor(record.sourceFileName, record.transcriptionId, record.audioUrl, record.rawSegments)}
-                      style={{
-                        backgroundColor: THEME_TOKENS.colors.surfaceDark,
-                        color: THEME_TOKENS.colors.textOnDark,
-                        border: 'none',
-                        padding: '0.45rem 0.95rem',
-                        borderRadius: THEME_TOKENS.radii.xs,
-                        fontSize: '0.8125rem',
-                        fontWeight: 600,
-                        cursor: 'pointer',
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '0.4rem',
-                        marginTop: '0.25rem',
-                      }}
-                      title="Abrir Módulo Pericial para auditar cadena de custodia e interlocutores"
-                    >
-                      <span>⚖️</span>
-                      <span>Módulo Pericial Forense</span>
-                    </button>
-
-                    {/* Botón de Dictamen Pericial Oficial condicionado a validación forense */}
-                    {(() => {
-                      const itemBD = record.transcriptionId
-                        ? TranscriptionDatabase.buscarPorId(record.transcriptionId)
-                        : undefined;
-                      const estaRevisado = !!itemBD?.revisado;
-
-                      return (
-                        <button
-                          onClick={() => {
-                            if (record.transcriptionId) {
-                              handleDescargarInformeDesdePanel(record.transcriptionId, record.sourceFileName);
-                            }
-                          }}
-                          style={{
-                            backgroundColor: estaRevisado ? '#1E4620' : 'transparent',
-                            color: estaRevisado ? '#ffffff' : THEME_TOKENS.colors.textMuted,
-                            border: `1px solid ${estaRevisado ? '#1E4620' : THEME_TOKENS.colors.borderDark}`,
-                            padding: '0.45rem 0.95rem',
-                            borderRadius: THEME_TOKENS.radii.xs,
-                            fontSize: '0.8125rem',
-                            fontWeight: 600,
-                            cursor: 'pointer',
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '0.4rem',
-                            marginTop: '0.25rem',
-                            transition: `all ${THEME_TOKENS.transitions.fast}`,
-                          }}
-                          title={
-                            estaRevisado
-                              ? 'Descargar Dictamen Pericial Oficial Certificado'
-                              : 'Emite el dictamen pericial tras validar interlocutores y hash en el Módulo Pericial'
-                          }
-                        >
-                          <span>{estaRevisado ? '📑' : '⚖️'}</span>
-                          <span>{estaRevisado ? 'Descargar Dictamen Oficial' : 'Emitir Dictamen Pericial'}</span>
-                        </button>
-                      );
-                    })()}
+                        {isLocal ? '✓ Listo' : 'Descargar'}
+                      </span>
+                    </div>
+                    <span style={{ fontSize: '0.725rem', color: THEME_TOKENS.colors.textMuted }}>
+                      {cfg.tamanoAproximadoMB} MB &middot; {cfg.nombreArchivo}
+                    </span>
+                    <span style={{ fontSize: '0.725rem', color: THEME_TOKENS.colors.textSecondary, marginTop: '0.2rem', lineHeight: 1.3 }}>
+                      {cfg.descripcion}
+                    </span>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
-        )}
+
+          {/* 3. ÚNICO Botón de Iniciar Transcripción */}
+          <div className="single-action-container">
+            <button
+              onClick={startTranscription}
+              disabled={isRunning || files.length === 0}
+              className="btn-start-primary"
+              style={{
+                backgroundColor: isRunning
+                  ? THEME_TOKENS.colors.borderStrong
+                  : files.length === 0
+                  ? THEME_TOKENS.colors.borderStrong
+                  : THEME_TOKENS.colors.accentPrimary,
+                color: THEME_TOKENS.colors.textOnDark,
+                border: `1px solid ${THEME_TOKENS.colors.borderDark}`,
+                boxShadow: files.length > 0 && !isRunning ? THEME_TOKENS.shadows.md : 'none',
+                cursor: isRunning || files.length === 0 ? 'not-allowed' : 'pointer',
+              }}
+            >
+              {isRunning
+                ? '⏳ Procesando transcripción...'
+                : files.length > 0
+                ? `▶ Iniciar Transcripción (${files.length} archivo${files.length > 1 ? 's' : ''})`
+                : '▶ Iniciar Transcripción (Selecciona un archivo)'}
+            </button>
+            <DonateButton />
+          </div>
+
+          {/* 4. Barra de Progreso en Tiempo Real (directamente debajo del botón) */}
+          {(isRunning || telemetriaActual.mensaje || statusMessage) && (
+            <TranscriptionProgressBar
+              porcentaje={isRunning ? telemetriaActual.porcentaje : (statusMessage.startsWith('❌') ? 0 : 100)}
+              etapaActual={telemetriaActual.etapaActual}
+              totalEtapas={telemetriaActual.totalEtapas}
+              mensaje={telemetriaActual.mensaje || statusMessage}
+              tiempoEstimadoSegundos={telemetriaActual.tiempoEstimadoSegundos}
+              velocidadFactor={telemetriaActual.velocidadFactor}
+              segundosProcesadosAudio={telemetriaActual.segundosProcesadosAudio}
+              totalSegundosAudio={telemetriaActual.totalSegundosAudio}
+              nombreArchivo={telemetriaActual.nombreArchivo}
+              enCancelar={handleCancelarTranscripcion}
+              cancelando={isCanceling}
+            />
+          )}
+
+          {/* 5. Resultados / Expedientes Generados */}
+          {transcriptionRecords.length > 0 && (
+            <div className="dashboard-section-card">
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+                <h3 style={{ margin: 0, color: THEME_TOKENS.colors.textPrimary, fontSize: '1.15rem', fontFamily: THEME_TOKENS.fonts.serif, fontWeight: 600 }}>
+                  Expedientes Generados
+                </h3>
+                <span style={{ fontSize: '0.75rem', color: THEME_TOKENS.colors.textMuted }}>
+                  Nomenclatura idéntica preservada por archivo cargado
+                </span>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+                {transcriptionRecords.map((record, idx) => (
+                  <div
+                    key={idx}
+                    className="folio-record-item"
+                    style={{
+                      backgroundColor: THEME_TOKENS.colors.bgCanvas,
+                      border: `1px solid ${THEME_TOKENS.colors.borderSubtle}`,
+                      borderLeft: `3px solid ${THEME_TOKENS.colors.surfaceDark}`,
+                      borderRadius: THEME_TOKENS.radii.xs,
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.4rem' }}>
+                      <strong style={{ color: THEME_TOKENS.colors.textPrimary, fontSize: '0.9rem', wordBreak: 'break-all' }}>
+                        📄 Archivo de origen: {record.sourceFileName}
+                      </strong>
+                      <span style={{ fontFamily: THEME_TOKENS.fonts.mono, fontSize: '0.75rem', color: THEME_TOKENS.colors.textMuted }}>
+                        ID Base: [{record.baseName}]
+                      </span>
+                    </div>
+
+                    <div className="folio-actions-container">
+                      {record.outputs.map((salida, sIdx) => (
+                        <a
+                          key={sIdx}
+                          href={salida.downloadUrl}
+                          download={salida.fileName}
+                          title={`Descargar ${salida.fileName}`}
+                          style={{
+                            color: THEME_TOKENS.colors.textPrimary,
+                            textDecoration: 'none',
+                            fontSize: '0.825rem',
+                            fontWeight: 600,
+                            borderBottom: `1px solid ${THEME_TOKENS.colors.accentTaupe}`,
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '0.35rem',
+                            wordBreak: 'break-all',
+                          }}
+                        >
+                          <span>↓</span>
+                          <span>Descargar <code>{salida.fileName}</code></span>
+                          <span style={{ color: THEME_TOKENS.colors.textMuted, fontSize: '0.75rem', fontWeight: 400 }}>
+                            ({salida.formatId.toUpperCase()})
+                          </span>
+                        </a>
+                      ))}
+
+                      <button
+                        onClick={() => handleAbrirRevisor(record.sourceFileName, record.transcriptionId, record.audioUrl, record.rawSegments)}
+                        style={{
+                          backgroundColor: THEME_TOKENS.colors.surfaceDark,
+                          color: THEME_TOKENS.colors.textOnDark,
+                          border: 'none',
+                          padding: '0.45rem 0.95rem',
+                          borderRadius: THEME_TOKENS.radii.xs,
+                          fontSize: '0.8125rem',
+                          fontWeight: 600,
+                          cursor: 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '0.4rem',
+                          marginTop: '0.25rem',
+                        }}
+                        title="Abrir Módulo Pericial para auditar cadena de custodia e interlocutores"
+                      >
+                        <span>⚖️</span>
+                        <span>Módulo Pericial Forense</span>
+                      </button>
+
+                      {(() => {
+                        const itemBD = record.transcriptionId
+                          ? TranscriptionDatabase.buscarPorId(record.transcriptionId)
+                          : undefined;
+                        const estaRevisado = !!itemBD?.revisado;
+
+                        return (
+                          <button
+                            onClick={() => {
+                              if (record.transcriptionId) {
+                                handleDescargarInformeDesdePanel(record.transcriptionId, record.sourceFileName);
+                              }
+                            }}
+                            style={{
+                              backgroundColor: estaRevisado ? '#1E4620' : 'transparent',
+                              color: estaRevisado ? '#ffffff' : THEME_TOKENS.colors.textMuted,
+                              border: `1px solid ${estaRevisado ? '#1E4620' : THEME_TOKENS.colors.borderDark}`,
+                              padding: '0.45rem 0.95rem',
+                              borderRadius: THEME_TOKENS.radii.xs,
+                              fontSize: '0.8125rem',
+                              fontWeight: 600,
+                              cursor: 'pointer',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '0.4rem',
+                              marginTop: '0.25rem',
+                              transition: `all ${THEME_TOKENS.transitions.fast}`,
+                            }}
+                            title={
+                              estaRevisado
+                                ? 'Descargar Dictamen Pericial Oficial Certificado'
+                                : 'Emite el dictamen pericial tras validar interlocutores y hash en el Módulo Pericial'
+                            }
+                          >
+                            <span>{estaRevisado ? '📑' : '⚖️'}</span>
+                            <span>{estaRevisado ? 'Descargar Dictamen Oficial' : 'Emitir Dictamen Pericial'}</span>
+                          </button>
+                        );
+                      })()}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </main>
       </div>
 
       {/* Sección de Base de Datos de Transcripciones Realizadas (Componente Modular SRP) */}

@@ -52,6 +52,8 @@ export class TranscriptionEngineAdapter implements ITranscriptionEngine {
           tiempoTranscurridoSegundos: Math.round(transcurrido),
           tiempoEstimadoSegundos: Math.round(eta),
           velocidadFactor: extra?.velocidadFactor || 1.0,
+          segundosProcesadosAudio: extra?.segundosProcesadosAudio,
+          totalSegundosAudio: extra?.totalSegundosAudio,
         };
         opciones.onProgreso(telemetria);
       }

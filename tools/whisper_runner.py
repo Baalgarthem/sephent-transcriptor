@@ -1294,37 +1294,99 @@ def transcribir(file_path: str, model_name: str, language: str,
 
     print(f"[whisper_runner] ETAPA 2/{total_etapas}: Transcribiendo audio: {os.path.basename(file_path)}", file=sys.stderr, flush=True)
 
-    # Telemetría de decodificación con cálculo en tiempo real de ETA
+    # Telemetría de decodificación continua en tiempo real de alta resolución (4 Hz)
     import time
+    import threading
+    progress_active = [True]
+    progress_tracker_ref = [None]
+    last_progress_emit = [0.0]
+
+    def ticker_tiempo_real():
+        pct_inicio = 15.0
+        pct_fin = 70.0 if diarize else 90.0
+        while progress_active[0]:
+            time.sleep(0.25)
+            tracker = progress_tracker_ref[0]
+            if not tracker or not progress_active[0]:
+                continue
+            try:
+                now = time.time()
+                elapsed = max(0.1, now - start_transcribe_time)
+                total_frames = tracker.total if tracker.total and tracker.total > 0 else (audio_duration * 100.0)
+                if total_frames <= 0:
+                    continue
+
+                confirmed_frames = tracker.n
+                avg_speed = getattr(tracker, 'estimated_speed', 1.0)
+                time_since_chunk = max(0.0, now - getattr(tracker, 'last_chunk_time', now))
+
+                # Interpolación fluida dentro de la ventana actual (tope en 28.5s para no sobrepasar el chunk)
+                interpolated_frames = min(2850.0, time_since_chunk * avg_speed * 100.0)
+                current_frames = min(total_frames, confirmed_frames + interpolated_frames)
+
+                frac = min(0.999, max(0.0, current_frames / float(total_frames)))
+                pct_global = pct_inicio + frac * (pct_fin - pct_inicio)
+                processed_sec = min(audio_duration, current_frames / 100.0)
+
+                if frac > 0.01:
+                    total_time_est = elapsed / frac
+                    eta_sec = max(0, total_time_est - elapsed)
+                else:
+                    eta_sec = 0
+
+                if now - last_progress_emit[0] >= 0.25:
+                    last_progress_emit[0] = now
+                    prog_data = {
+                        "pct": round(pct_global, 1),
+                        "eta_sec": round(eta_sec),
+                        "speed": round(avg_speed, 1),
+                        "stage": 2,
+                        "processed_sec": round(processed_sec, 1),
+                        "total_sec": round(audio_duration, 1),
+                        "msg": f"Decodificando audio con Whisper ({pct_global:.1f}%)..."
+                    }
+                    print(f"[whisper_progress] {json.dumps(prog_data)}", file=sys.stderr, flush=True)
+            except Exception:
+                pass
+
     try:
         import tqdm
         orig_tqdm = tqdm.tqdm
         start_transcribe_time = time.time()
-        
+
         class WhisperProgressTracker(orig_tqdm):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                self.estimated_speed = 1.0
+                self.last_chunk_time = time.time()
+                progress_tracker_ref[0] = self
+
             def update(self, n=1):
                 super().update(n)
+                now = time.time()
+                self.last_chunk_time = now
+                elapsed = max(0.1, now - start_transcribe_time)
                 if self.total and self.total > 0:
                     frac = min(1.0, max(0.0, self.n / float(self.total)))
+                    if frac > 0 and audio_duration > 0:
+                        self.estimated_speed = max(0.1, (frac * audio_duration) / elapsed)
+
                     pct_inicio = 15.0
                     pct_fin = 70.0 if diarize else 90.0
                     pct_global = pct_inicio + frac * (pct_fin - pct_inicio)
-                    
-                    elapsed = max(0.1, time.time() - start_transcribe_time)
-                    if frac > 0.02:
-                        total_time_est = elapsed / frac
-                        eta_sec = max(0, total_time_est - elapsed)
-                    else:
-                        eta_sec = 0
-                    
-                    speed = (frac * audio_duration) / elapsed if (audio_duration > 0 and elapsed > 0) else 1.0
-                    
+                    total_time_est = elapsed / max(0.01, frac)
+                    eta_sec = max(0, total_time_est - elapsed)
+                    processed_sec = min(audio_duration, self.n / 100.0)
+
+                    last_progress_emit[0] = now
                     prog_data = {
                         "pct": round(pct_global, 1),
                         "eta_sec": round(eta_sec),
-                        "speed": round(speed, 1),
+                        "speed": round(self.estimated_speed, 1),
                         "stage": 2,
-                        "msg": f"Decodificando audio con Whisper ({pct_global:.0f}%)..."
+                        "processed_sec": round(processed_sec, 1),
+                        "total_sec": round(audio_duration, 1),
+                        "msg": f"Decodificando audio con Whisper ({pct_global:.1f}%)..."
                     }
                     print(f"[whisper_progress] {json.dumps(prog_data)}", file=sys.stderr, flush=True)
 
@@ -1344,6 +1406,8 @@ def transcribir(file_path: str, model_name: str, language: str,
                         pass
 
         tqdm.tqdm = WhisperProgressTracker
+        ticker_thread = threading.Thread(target=ticker_tiempo_real, daemon=True)
+        ticker_thread.start()
     except Exception:
         orig_tqdm = None
 
@@ -1371,6 +1435,7 @@ def transcribir(file_path: str, model_name: str, language: str,
                 pass
         raise e_transcribe
     finally:
+        progress_active[0] = False
         sys.stdout = real_stdout
         if orig_tqdm:
             try:

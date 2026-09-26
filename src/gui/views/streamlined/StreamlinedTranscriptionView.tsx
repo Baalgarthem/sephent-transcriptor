@@ -60,6 +60,8 @@ export default function StreamlinedTranscriptionView(): React.ReactElement {
     mensaje: string;
     tiempoEstimadoSegundos: number;
     velocidadFactor: number;
+    segundosProcesadosAudio?: number;
+    totalSegundosAudio?: number;
     nombreArchivo?: string;
   }>({
     porcentaje: 0,
@@ -140,6 +142,8 @@ export default function StreamlinedTranscriptionView(): React.ReactElement {
                 mensaje: t.mensaje,
                 tiempoEstimadoSegundos: t.tiempoEstimadoSegundos || 0,
                 velocidadFactor: t.velocidadFactor || 1.0,
+                segundosProcesadosAudio: t.segundosProcesadosAudio,
+                totalSegundosAudio: t.totalSegundosAudio,
                 nombreArchivo: file.name,
               });
             }
@@ -584,7 +588,11 @@ export default function StreamlinedTranscriptionView(): React.ReactElement {
             mensaje={telemetria.mensaje}
             tiempoEstimadoSegundos={telemetria.tiempoEstimadoSegundos}
             velocidadFactor={telemetria.velocidadFactor}
+            segundosProcesadosAudio={telemetria.segundosProcesadosAudio}
+            totalSegundosAudio={telemetria.totalSegundosAudio}
             nombreArchivo={telemetria.nombreArchivo}
+            enCancelar={handleCancelar}
+            cancelando={cancelando}
           />
         </div>
       )}
