@@ -29,6 +29,11 @@ export interface TranscriptionRecord {
   readonly audioUrl?: string;
   readonly textContent?: string;
   readonly srtContent?: string;
+  readonly isPartial?: boolean;
+  readonly wasCancelled?: boolean;
+  readonly status?: 'completado' | 'parcial' | 'error';
+  readonly errorMotivo?: string;
+  readonly logPath?: string;
 }
 
 export interface SelectedOutputFormats {

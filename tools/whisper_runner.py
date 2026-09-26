@@ -1126,10 +1126,63 @@ def normalizar_audio_amplitud(audio_np: np.ndarray, target_peak: float = 0.95) -
     return audio_np
 
 
+def guardar_transcripcion_parcial(ruta_parcial: str, segs_raw: list, idioma: str, modelo: str, duracion_total: float):
+    """
+    Guarda en disco de forma atómica la transcripción parcial acumulada hasta el momento actual.
+    Permite recuperar el trabajo transcrito si el usuario cancela o si ocurre un fallo fortuito.
+    """
+    if not ruta_parcial:
+        return
+    try:
+        segs_formateados = []
+        for i, s in enumerate(segs_raw):
+            t_start = round(float(s.get("start", 0.0)), 3)
+            t_end = round(float(s.get("end", 0.0)), 3)
+            avg_logprob = float(s.get("avg_logprob", -0.1))
+            conf = round(min(1.0, max(0.0, 1.0 + avg_logprob / 5.0)), 3)
+            texto_p = corregir_puntuacion_y_ortografia(s.get("text", ""), idioma=idioma)
+            segs_formateados.append({
+                "id": f"seg_{i + 1}",
+                "speakerId": "speaker_01",
+                "startTime": t_start,
+                "endTime": t_end,
+                "text": texto_p,
+                "confidence": conf,
+            })
+
+        dur_actual = segs_formateados[-1]["endTime"] if segs_formateados else 0.0
+
+        datos = {
+            "segments": segs_formateados,
+            "speakerNames": {"speaker_01": "Persona 1"},
+            "durationSeconds": dur_actual,
+            "totalAudioSeconds": round(duracion_total, 3),
+            "modelUsed": modelo,
+            "language": idioma,
+            "numSpeakers": 1,
+            "isPartial": True,
+            "status": "parcial"
+        }
+
+        parent_dir = os.path.dirname(os.path.abspath(ruta_parcial))
+        if parent_dir and not os.path.exists(parent_dir):
+            os.makedirs(parent_dir, exist_ok=True)
+
+        temp_file = ruta_parcial + ".tmp"
+        with open(temp_file, "w", encoding="utf-8") as f:
+            json.dump(datos, f, ensure_ascii=False)
+        if os.path.exists(ruta_parcial):
+            os.remove(ruta_parcial)
+        os.rename(temp_file, ruta_parcial)
+    except Exception:
+        pass
+
+
 def transcribir(file_path: str, model_name: str, language: str,
                 num_speakers: int, device_override: str = "auto",
                 diarize: bool = True, model_dir: str = None,
-                anti_truncation: bool = True) -> dict:
+                anti_truncation: bool = True,
+                output_json: str = None) -> dict:
     """
     Carga Whisper, transcribe y opcionalmente aplica diarización. Retorna dict ResultadoWhisper.
 
@@ -1144,6 +1197,8 @@ def transcribir(file_path: str, model_name: str, language: str,
     """
     import whisper
     import gc
+
+    partial_output_path = (output_json + ".partial") if output_json else None
 
     model_alias = {"turbo": "large-v3-turbo"}
     resolved_model = model_alias.get(model_name, model_name)
@@ -1273,6 +1328,21 @@ def transcribir(file_path: str, model_name: str, language: str,
                     }
                     print(f"[whisper_progress] {json.dumps(prog_data)}", file=sys.stderr, flush=True)
 
+                    # Captura y resguardo en disco de la transcripción parcial en tiempo real
+                    try:
+                        caller_frame = sys._getframe(1)
+                        live_segs = caller_frame.f_locals.get("all_segments")
+                        if live_segs and partial_output_path:
+                            guardar_transcripcion_parcial(
+                                partial_output_path,
+                                live_segs,
+                                caller_frame.f_locals.get("language", language_usado),
+                                resolved_model,
+                                audio_duration
+                            )
+                    except Exception:
+                        pass
+
         tqdm.tqdm = WhisperProgressTracker
     except Exception:
         orig_tqdm = None
@@ -1283,6 +1353,23 @@ def transcribir(file_path: str, model_name: str, language: str,
         # de Whisper (como 'Detected language:') o PyTorch contamine el canal JSON
         sys.stdout = sys.stderr
         result = model.transcribe(file_path, **kwargs)
+    except Exception as e_transcribe:
+        sys.stdout = real_stdout
+        print(f"[whisper_runner] AVISO: Interrupción durante transcripción: {e_transcribe}", file=sys.stderr, flush=True)
+        # Si se guardó una transcripción parcial antes del error, recuperarla para no perderla
+        if partial_output_path and os.path.isfile(partial_output_path):
+            try:
+                with open(partial_output_path, "r", encoding="utf-8") as pf:
+                    res_parcial = json.load(pf)
+                res_parcial["error"] = str(e_transcribe)
+                res_parcial["status"] = "parcial_con_error"
+                if output_json:
+                    with open(output_json, "w", encoding="utf-8") as of:
+                        json.dump(res_parcial, of, ensure_ascii=False)
+                return res_parcial
+            except Exception:
+                pass
+        raise e_transcribe
     finally:
         sys.stdout = real_stdout
         if orig_tqdm:
@@ -1460,6 +1547,12 @@ def transcribir(file_path: str, model_name: str, language: str,
         digits = "".join(c for c in spk_id if c.isdigit()) or "1"
         speaker_names[spk_id] = f"Persona {int(digits)}"
 
+    if partial_output_path and os.path.isfile(partial_output_path):
+        try:
+            os.remove(partial_output_path)
+        except Exception:
+            pass
+
     return {
         "segments": output_segments,
         "speakerNames": speaker_names,
@@ -1517,7 +1610,8 @@ def main():
             args.device,
             diarize=diarize_enabled,
             model_dir=args.model_dir,
-            anti_truncation=anti_truncation_enabled
+            anti_truncation=anti_truncation_enabled,
+            output_json=args.output_json
         )
 
         if args.output_json:

@@ -2,9 +2,10 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::collections::HashSet;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use tauri::{AppHandle, Manager, Window};
 
@@ -1381,9 +1382,155 @@ async fn guardar_archivo_temporal(nombre: String, datos_bytes: Vec<u8>) -> Resul
 }
 
 static PROCESO_TRANSCRIPCION_PID: Mutex<Option<u32>> = Mutex::new(None);
+static CANCELACION_SOLICITADA: AtomicBool = AtomicBool::new(false);
+
+fn resolver_carpeta_logs() -> PathBuf {
+    // 1. Priorizar carpeta "logs" dentro del directorio del programa (donde reside el ejecutable)
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(exe_dir) = exe_path.parent() {
+            let candidate = exe_dir.join("logs");
+            let _ = std::fs::create_dir_all(&candidate);
+            if candidate.is_dir() {
+                // Probar permisos de escritura con archivo efímero
+                let probe = candidate.join(".probe_log.tmp");
+                if std::fs::write(&probe, b"ok").is_ok() {
+                    let _ = std::fs::remove_file(&probe);
+                    return candidate;
+                }
+            }
+        }
+    }
+
+    // 2. Si el directorio del ejecutable no es escribible (ej. C:\Program Files sin elevación UAC),
+    // usar %APPDATA%\sephent-transcriptor\logs
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(appdata) = std::env::var("APPDATA") {
+            let candidate = PathBuf::from(appdata).join("sephent-transcriptor").join("logs");
+            let _ = std::fs::create_dir_all(&candidate);
+            return candidate;
+        }
+    }
+
+    // 3. Fallback universal al directorio temporal
+    let fallback = std::env::temp_dir().join("sephent_transcriptor").join("logs");
+    let _ = std::fs::create_dir_all(&fallback);
+    fallback
+}
+
+fn obtener_timestamp_iso() -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    let total_secs = now.as_secs();
+    let millis = now.subsec_millis();
+    let secs_day = total_secs % 86400;
+    let hours = secs_day / 3600;
+    let minutes = (secs_day % 3600) / 60;
+    let seconds = secs_day % 60;
+
+    let mut days = (total_secs / 86400) as i64;
+    let mut year = 1970;
+    loop {
+        let leap = (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0);
+        let days_in_year = if leap { 366 } else { 365 };
+        if days < days_in_year {
+            break;
+        }
+        days -= days_in_year;
+        year += 1;
+    }
+    let leap = (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0);
+    let days_in_months = [
+        31, if leap { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31
+    ];
+    let mut month = 1;
+    for &dim in days_in_months.iter() {
+        if days < dim {
+            break;
+        }
+        days -= dim;
+        month += 1;
+    }
+    let day = days + 1;
+    format!("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:03}Z", year, month, day, hours, minutes, seconds, millis)
+}
+
+fn registrar_log_error(componente: &str, mensaje: &str, contexto: Option<&str>, ruta_audio: Option<&str>) -> PathBuf {
+    let logs_dir = resolver_carpeta_logs();
+    let log_file = logs_dir.join("sephent_errores.log");
+    let ts = obtener_timestamp_iso();
+
+    let audio_info = ruta_audio.unwrap_or("N/A");
+    let ctx_info = contexto.unwrap_or("Sin contexto adicional");
+
+    let entrada = format!(
+        "\n================================================================================\n\
+        FECHA/HORA: {}\n\
+        NIVEL: ERROR\n\
+        COMPONENTE: {}\n\
+        ARCHIVO DE AUDIO: {}\n\
+        DETALLE DEL ERROR:\n{}\n\
+        CONTEXTO TÉCNICO:\n{}\n\
+        ================================================================================\n",
+        ts, componente, audio_info, mensaje, ctx_info
+    );
+
+    if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(&log_file) {
+        let _ = file.write_all(entrada.as_bytes());
+    }
+
+    log_file
+}
+
+#[tauri::command]
+async fn registrar_error_log(
+    componente: String,
+    mensaje: String,
+    contexto: Option<String>,
+    ruta_audio: Option<String>,
+) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let path = registrar_log_error(&componente, &mensaje, contexto.as_deref(), ruta_audio.as_deref());
+        Ok(path.to_string_lossy().to_string())
+    })
+    .await
+    .map_err(|e| format!("Error al registrar log: {}", e))?
+}
+
+#[tauri::command]
+async fn abrir_carpeta_logs() -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let dir = resolver_carpeta_logs();
+        #[cfg(target_os = "windows")]
+        {
+            let mut cmd = Command::new("explorer.exe");
+            cmd.arg(&dir);
+            configurar_proceso_oculto(&mut cmd);
+            let _ = cmd.spawn();
+        }
+        #[cfg(target_os = "macos")]
+        {
+            let _ = Command::new("open").arg(&dir).spawn();
+        }
+        #[cfg(target_os = "linux")]
+        {
+            let _ = Command::new("xdg-open").arg(&dir).spawn();
+        }
+        Ok(dir.to_string_lossy().to_string())
+    })
+    .await
+    .map_err(|e| format!("Error abriendo carpeta de logs: {}", e))?
+}
+
+#[tauri::command]
+async fn obtener_ruta_carpeta_logs() -> Result<String, String> {
+    Ok(resolver_carpeta_logs().to_string_lossy().to_string())
+}
 
 #[tauri::command]
 async fn cancelar_transcripcion() -> Result<(), String> {
+    CANCELACION_SOLICITADA.store(true, Ordering::SeqCst);
     tauri::async_runtime::spawn_blocking(|| {
         let pid_opt = {
             if let Ok(mut lock) = PROCESO_TRANSCRIPCION_PID.lock() {
@@ -1425,6 +1572,8 @@ async fn transcribir_audio_whisper(
     window: Window,
 ) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
+        CANCELACION_SOLICITADA.store(false, Ordering::SeqCst);
+
         let p_audio = Path::new(&ruta_audio);
         if !p_audio.is_file() {
             return Err(format!("Archivo no encontrado en disco: {}", ruta_audio));
@@ -1467,6 +1616,7 @@ async fn transcribir_audio_whisper(
             std::process::id(),
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis()
         ));
+        let partial_json_path = PathBuf::from(format!("{}.partial", output_json_path.to_string_lossy()));
 
         let mut cmd = Command::new(&info.python_ruta);
         let mut python_path_entries = vec![temp_dir.to_string_lossy().to_string()];
@@ -1496,7 +1646,7 @@ async fn transcribir_audio_whisper(
         cmd.arg(if evitar_trunc_activo { "true" } else { "false" });
         cmd.arg("--output-json");
         cmd.arg(&output_json_path);
-        // v0.2.0: permitir que Python detecte y use CUDA/GPU automáticamente
+        // Permitir que Python detecte y use CUDA/GPU automáticamente
         cmd.arg("--device");
         cmd.arg("auto");
         if let Some(ref rm) = ruta_modelos {
@@ -1527,6 +1677,9 @@ async fn transcribir_audio_whisper(
         let stderr = child.stderr.take().ok_or("No se pudo capturar stderr de whisper")?;
         let stdout = child.stdout.take().ok_or("No se pudo capturar stdout de whisper")?;
 
+        let lineas_stderr = std::sync::Arc::new(Mutex::new(Vec::<String>::new()));
+        let lineas_stderr_clone = lineas_stderr.clone();
+
         let window_clone = window.clone();
         let modelo_clone = modelo_norm.clone();
         std::thread::spawn(move || {
@@ -1535,6 +1688,13 @@ async fn transcribir_audio_whisper(
                 if let Ok(l) = linea {
                     let trimmed = l.trim();
                     if !trimmed.is_empty() {
+                        if let Ok(mut buffer) = lineas_stderr_clone.lock() {
+                            buffer.push(trimmed.to_string());
+                            if buffer.len() > 100 {
+                                buffer.remove(0);
+                            }
+                        }
+
                         if trimmed.starts_with("[whisper_progress]") {
                             let json_part = trimmed.trim_start_matches("[whisper_progress]").trim();
                             if let Ok(v) = serde_json::from_str::<serde_json::Value>(json_part) {
@@ -1606,7 +1766,7 @@ async fn transcribir_audio_whisper(
             }
         });
 
-        // v0.2.0: Leer stdout en un hilo paralelo (no bloqueante) para garantizar
+        // Leer stdout en un hilo paralelo (no bloqueante) para garantizar
         // que los eventos de progreso de stderr sigan fluyendo sin interrupciones
         // mientras Python escribe el JSON de salida (que puede ser muy largo).
         let (tx_stdout, rx_stdout) = std::sync::mpsc::channel::<String>();
@@ -1629,9 +1789,12 @@ async fn transcribir_audio_whisper(
             *lock = None;
         }
 
+        let fue_cancelado = CANCELACION_SOLICITADA.load(Ordering::SeqCst);
+
         // Si se generó el archivo JSON directo en disco, leerlo para evitar truncamientos de pipe del SO
         let mut contenido_json = String::new();
         let mut leido_de_archivo = false;
+        let mut es_parcial = false;
 
         if output_json_path.is_file() {
             if let Ok(disk_content) = std::fs::read_to_string(&output_json_path) {
@@ -1644,14 +1807,25 @@ async fn transcribir_audio_whisper(
             let _ = std::fs::remove_file(&output_json_path);
         }
 
-        if !leido_de_archivo {
+        // Si la transcripción fue cancelada o falló, o si no hubo salida completa, revisar el archivo parcial
+        if (!leido_de_archivo || fue_cancelado || !status.success()) && partial_json_path.is_file() {
+            if let Ok(partial_content) = std::fs::read_to_string(&partial_json_path) {
+                let trimmed = partial_content.trim();
+                if !trimmed.is_empty() {
+                    if contenido_json.is_empty() || fue_cancelado || !status.success() {
+                        contenido_json = trimmed.to_string();
+                        leido_de_archivo = true;
+                        es_parcial = true;
+                    }
+                }
+            }
+            let _ = std::fs::remove_file(&partial_json_path);
+        }
+
+        if !leido_de_archivo && !fue_cancelado {
             // Recoger el JSON de stdout desde el hilo paralelo como respaldo
             let salida_stdout = rx_stdout.recv().unwrap_or_default();
             contenido_json = salida_stdout.trim().to_string();
-        }
-
-        if !status.success() || contenido_json.is_empty() {
-            return Err(format!("El proceso de Whisper finalizó con código {:?}. Salida: {}", status.code(), contenido_json));
         }
 
         // Extraer el bloque JSON de forma robusta en caso de que existan textos previos o posteriores en stdout
@@ -1665,20 +1839,87 @@ async fn transcribir_audio_whisper(
             &contenido_json
         };
 
-        if let Ok(val) = serde_json::from_str::<serde_json::Value>(json_extraido) {
-            if let Some(err_msg) = val.get("error").and_then(|e| e.as_str()) {
-                return Err(format!("Error en motor Whisper: {}", err_msg));
+        let val_parsed_opt = serde_json::from_str::<serde_json::Value>(json_extraido).ok();
+
+        let tiene_segmentos = val_parsed_opt
+            .as_ref()
+            .and_then(|v| v.get("segments"))
+            .and_then(|s| s.as_array())
+            .map_or(false, |arr| !arr.is_empty());
+
+        // 1. Caso resiliente: Hay segmentos recuperados (completos o parciales por cancelación o interrupción técnica)
+        if tiene_segmentos {
+            let mut val = val_parsed_opt.unwrap();
+            let es_parcial_efectivo = es_parcial || fue_cancelado || !status.success() || val.get("isPartial").and_then(|p| p.as_bool()).unwrap_or(false);
+
+            if es_parcial_efectivo {
+                val["isPartial"] = serde_json::json!(true);
+                val["wasCancelled"] = serde_json::json!(fue_cancelado);
+                val["status"] = serde_json::json!("parcial");
+
+                if fue_cancelado {
+                    val["errorMotivo"] = serde_json::json!("Cancelado por el usuario.");
+                    let _ = window.emit("transcripcion-progreso", serde_json::json!({
+                        "porcentaje": 100,
+                        "mensaje": "Transcripción detenida por el usuario. Expediente parcial rescatado con éxito."
+                    }));
+                } else if !status.success() || val.get("error").is_some() {
+                    let stderr_str = lineas_stderr.lock().map(|l| l.join("\n")).unwrap_or_default();
+                    let err_detalle = val.get("error")
+                        .and_then(|e| e.as_str())
+                        .unwrap_or("Fallo prematuro durante el procesamiento acústico.");
+                    let log_file = registrar_log_error(
+                        "MotorTranscripcion",
+                        &format!("Interrupción técnica (código {:?}): {}", status.code(), err_detalle),
+                        Some(&stderr_str),
+                        Some(&ruta_audio)
+                    );
+                    val["errorMotivo"] = serde_json::json!(err_detalle);
+                    val["logPath"] = serde_json::json!(log_file.to_string_lossy().to_string());
+                    let _ = window.emit("transcripcion-progreso", serde_json::json!({
+                        "porcentaje": 100,
+                        "mensaje": format!("Interrupción técnica en Whisper. Se rescató la transcripción parcial y se registró log en {}", log_file.display())
+                    }));
+                } else {
+                    let _ = window.emit("transcripcion-progreso", serde_json::json!({
+                        "porcentaje": 100,
+                        "mensaje": "Transcripción completada con éxito."
+                    }));
+                }
+            } else {
+                let _ = window.emit("transcripcion-progreso", serde_json::json!({
+                    "porcentaje": 100,
+                    "mensaje": "Transcripción completada con éxito."
+                }));
             }
-        } else {
-            return Err(format!("Respuesta inválida del motor de transcripción (no se pudo parsear JSON). Salida: {}", contenido_json));
+
+            return Ok(val.to_string());
         }
 
-        let _ = window.emit("transcripcion-progreso", serde_json::json!({
-            "porcentaje": 100,
-            "mensaje": "Transcripción completada con éxito."
-        }));
+        // 2. Caso sin segmentos recuperados (error inicial o cancelación previa a decodificación)
+        if fue_cancelado {
+            return Err("Transcripción cancelada por el usuario antes de procesar segmentos.".to_string());
+        }
 
-        Ok(json_extraido.to_string())
+        let stderr_str = lineas_stderr.lock().map(|l| l.join("\n")).unwrap_or_default();
+        let err_detalle = if let Some(ref val) = val_parsed_opt {
+            val.get("error").and_then(|e| e.as_str()).unwrap_or("Error en motor Whisper")
+        } else {
+            "El proceso de Whisper finalizó sin generar datos."
+        };
+
+        let log_file = registrar_log_error(
+            "MotorTranscripcion",
+            &format!("Error fatal en Whisper (código {:?}): {}\nSalida: {}", status.code(), err_detalle, contenido_json),
+            Some(&stderr_str),
+            Some(&ruta_audio)
+        );
+
+        Err(format!(
+            "Error en motor Whisper: {}. El programa continúa operando con normalidad. Se generó un registro detallado en: {}",
+            err_detalle,
+            log_file.display()
+        ))
     })
     .await
     .map_err(|e| format!("Error en tarea asíncrona de transcripción: {}", e))?
@@ -1698,7 +1939,10 @@ fn main() {
             cancelar_transcripcion,
             verificar_permisos_directorio,
             seleccionar_carpeta_dialogo,
-            mover_modelos_whisper
+            mover_modelos_whisper,
+            registrar_error_log,
+            abrir_carpeta_logs,
+            obtener_ruta_carpeta_logs
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

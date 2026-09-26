@@ -40,6 +40,11 @@ export interface ResultadoTranscripcionContrato {
   txtContent: string;
   srtContent: string;
   completedAt: string;
+  isPartial?: boolean;
+  wasCancelled?: boolean;
+  status?: 'completado' | 'parcial' | 'error';
+  errorMotivo?: string;
+  logPath?: string;
 }
 
 export interface ITranscriptionEngine {

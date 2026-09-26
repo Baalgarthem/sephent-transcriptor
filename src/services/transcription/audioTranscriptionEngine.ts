@@ -38,6 +38,11 @@ export interface ResultadoProcesamientoAudio {
   srtContent: string;
   speakerNames: Record<string, string>;
   durationSeconds: number;
+  isPartial?: boolean;
+  wasCancelled?: boolean;
+  status?: 'completado' | 'parcial' | 'error';
+  errorMotivo?: string;
+  logPath?: string;
 }
 
 export class AudioTranscriptionEngine {
@@ -69,7 +74,7 @@ export class AudioTranscriptionEngine {
         );
 
         let finalSegments = resultado.segments;
-        if (evitarTruncamiento && resultado.durationSeconds > 0) {
+        if (evitarTruncamiento && resultado.durationSeconds > 0 && !resultado.isPartial) {
           const antiTrunc = (typeof appContainer !== 'undefined' && appContainer?.has(DI_TOKENS.ANTI_TRUNCATION))
             ? appContainer.resolve<IAntiTruncationService>(DI_TOKENS.ANTI_TRUNCATION)
             : new AntiTruncationService();
@@ -88,11 +93,21 @@ export class AudioTranscriptionEngine {
 
         const txtContent = this.generarTextoPlano(
           file.name, opciones.model, resultado.language,
-          finalSegments, resultado.speakerNames
+          finalSegments, resultado.speakerNames,
+          resultado.isPartial, resultado.wasCancelled, resultado.errorMotivo
         );
         const srtContent = this.generarSubtitulosSrt(finalSegments, resultado.speakerNames);
 
-        if (onProgreso) onProgreso(100, 'Transcripción completada con éxito.');
+        if (onProgreso) {
+          if (resultado.isPartial) {
+            onProgreso(100, resultado.wasCancelled
+              ? 'Transcripción cancelada: expediente parcial rescatado con éxito.'
+              : 'Interrupción técnica: transcripción parcial rescatada con registro de auditoría.'
+            );
+          } else {
+            onProgreso(100, 'Transcripción completada con éxito.');
+          }
+        }
 
         return {
           segments: finalSegments,
@@ -100,6 +115,11 @@ export class AudioTranscriptionEngine {
           srtContent,
           speakerNames: resultado.speakerNames,
           durationSeconds: resultado.durationSeconds,
+          isPartial: resultado.isPartial,
+          wasCancelled: resultado.wasCancelled,
+          status: (resultado.status as any) || (resultado.isPartial ? 'parcial' : 'completado'),
+          errorMotivo: resultado.errorMotivo,
+          logPath: resultado.logPath,
         };
       } catch (err: any) {
         // En entorno de escritorio, no ocultar errores reales con simulaciones
@@ -247,18 +267,39 @@ export class AudioTranscriptionEngine {
     modelo: string,
     idioma: string,
     segmentos: RawTranscriptSegment[],
-    speakerNames: Record<string, string>
+    speakerNames: Record<string, string>,
+    isPartial: boolean = false,
+    wasCancelled: boolean = false,
+    errorMotivo?: string
   ): string {
     const lineas: string[] = [];
-    lineas.push('================================================================================');
-    lineas.push('                   TRANSCRIPCIÓN DE AUDIO/VIDEO — SEPHENT TRANSCRIPTOR');
-    lineas.push('================================================================================');
-    lineas.push(`Documento de Origen:  ${nombreArchivo}`);
-    lineas.push(`Modelo Utilizado:     ${modelo}`);
-    lineas.push(`Idioma:               ${idioma.toUpperCase()}`);
-    lineas.push(`Fecha de Proceso:     ${new Date().toLocaleString('es-ES')}`);
-    lineas.push(`Hablantes Detectados: ${Object.values(speakerNames).join(', ')}`);
-    lineas.push('================================================================================\n');
+    if (isPartial) {
+      lineas.push('================================================================================');
+      lineas.push('        TRANSCRIPCIÓN DE AUDIO/VIDEO [EXPEDIENTE PARCIAL RESCATADO]');
+      lineas.push('================================================================================');
+      lineas.push(`Documento de Origen:  ${nombreArchivo}`);
+      lineas.push(`Estado:               PARCIAL (${wasCancelled ? 'Interrumpido por solicitud del usuario' : 'Interrumpido por fallo técnico recuperado'})`);
+      if (errorMotivo) {
+        lineas.push(`Detalle de Causa:     ${errorMotivo}`);
+      }
+      lineas.push(`Modelo Utilizado:     ${modelo}`);
+      lineas.push(`Idioma:               ${idioma.toUpperCase()}`);
+      lineas.push(`Fecha de Proceso:     ${new Date().toLocaleString('es-ES')}`);
+      lineas.push(`Hablantes Detectados: ${Object.values(speakerNames).join(', ')}`);
+      lineas.push('Nota Pericial:        Se preservan con integridad forense todos los segmentos');
+      lineas.push('                      acústicos decodificados hasta el momento de la interrupción.');
+      lineas.push('================================================================================\n');
+    } else {
+      lineas.push('================================================================================');
+      lineas.push('                   TRANSCRIPCIÓN DE AUDIO/VIDEO — SEPHENT TRANSCRIPTOR');
+      lineas.push('================================================================================');
+      lineas.push(`Documento de Origen:  ${nombreArchivo}`);
+      lineas.push(`Modelo Utilizado:     ${modelo}`);
+      lineas.push(`Idioma:               ${idioma.toUpperCase()}`);
+      lineas.push(`Fecha de Proceso:     ${new Date().toLocaleString('es-ES')}`);
+      lineas.push(`Hablantes Detectados: ${Object.values(speakerNames).join(', ')}`);
+      lineas.push('================================================================================\n');
+    }
 
     for (const seg of segmentos) {
       const nombre = speakerNames[seg.speakerId] || seg.speakerId;
@@ -375,7 +416,7 @@ export class AudioTranscriptionEngine {
     const s = Math.max(0, segundos);
     const m = Math.floor(s / 60);
     const seg = Math.floor(s % 60);
-    const ms = Math.floor((s % 1) * 1000);
+    const ms = Math.min(999, Math.round((s % 1) * 1000));
     return `${String(m).padStart(2, '0')}:${String(seg).padStart(2, '0')}.${String(ms).padStart(3, '0')}`;
   }
 
@@ -384,7 +425,7 @@ export class AudioTranscriptionEngine {
     const h = Math.floor(s / 3600);
     const m = Math.floor((s % 3600) / 60);
     const seg = Math.floor(s % 60);
-    const ms = Math.floor((s % 1) * 1000);
+    const ms = Math.min(999, Math.round((s % 1) * 1000));
     return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(seg).padStart(2, '0')},${String(ms).padStart(3, '0')}`;
   }
 }

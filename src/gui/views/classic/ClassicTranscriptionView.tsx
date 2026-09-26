@@ -258,6 +258,18 @@ export default function ClassicTranscriptionView(): React.ReactElement {
     UserSettingsService.guardarConfiguracion({ modoDestino: nuevoModo });
   };
 
+  const handleAbrirCarpetaLogs = async () => {
+    if (typeof window !== 'undefined' && (window as any).__TAURI__?.invoke) {
+      try {
+        await (window as any).__TAURI__.invoke('abrir_carpeta_logs');
+      } catch (e) {
+        alert('No se pudo abrir automáticamente la carpeta de registros.');
+      }
+    } else {
+      alert('La apertura directa de la carpeta de registros está disponible en la versión de escritorio.');
+    }
+  };
+
   /**
    * Agrega archivos a la cola a partir de rutas absolutas de disco (Tauri Dialog o Drag & Drop)
    */
@@ -509,8 +521,8 @@ export default function ClassicTranscriptionView(): React.ReactElement {
 
     await new Promise((r) => setTimeout(r, 400));
 
+    const records: TranscriptionRecord[] = [];
     try {
-      const records: TranscriptionRecord[] = [];
       for (let i = 0; i < files.length; i++) {
         if (cancelacionSolicitada.current) {
           break;
@@ -559,7 +571,8 @@ export default function ClassicTranscriptionView(): React.ReactElement {
           },
         });
 
-        if (cancelacionSolicitada.current) {
+        const tieneSegmentos = resultadoAudio.rawSegments && resultadoAudio.rawSegments.length > 0;
+        if (cancelacionSolicitada.current && !tieneSegmentos) {
           break;
         }
 
@@ -622,6 +635,9 @@ export default function ClassicTranscriptionView(): React.ReactElement {
           }
         }
 
+        const esParcial = !!resultadoAudio.isPartial;
+        const statusFinal: 'completado' | 'parcial' | 'error' = esParcial ? 'parcial' : 'completado';
+
         const registroBD = TranscriptionDatabase.guardar({
           fileName: file.name,
           fileType: esArchivoVideo(file) ? 'video' : 'audio',
@@ -631,7 +647,11 @@ export default function ClassicTranscriptionView(): React.ReactElement {
           destinationType: modoDestino,
           destinationFolder: carpetaDestino,
           outputs: salidasBD,
-          status: 'completado',
+          status: statusFinal,
+          isPartial: esParcial,
+          wasCancelled: resultadoAudio.wasCancelled,
+          errorMotivo: resultadoAudio.errorMotivo,
+          logPath: resultadoAudio.logPath,
           rawSegments: resultadoAudio.rawSegments,
           textContent: resultadoAudio.txtContent,
           srtContent: resultadoAudio.srtContent,
@@ -646,25 +666,37 @@ export default function ClassicTranscriptionView(): React.ReactElement {
           textContent: resultadoAudio.txtContent,
           srtContent: resultadoAudio.srtContent,
           audioUrl: audioBlobUrl,
+          isPartial: esParcial,
+          wasCancelled: resultadoAudio.wasCancelled,
+          status: statusFinal,
+          errorMotivo: resultadoAudio.errorMotivo,
+          logPath: resultadoAudio.logPath,
         });
       }
 
-      if (cancelacionSolicitada.current) {
-        setStatusMessage('⏹ Transcripción cancelada por el usuario.');
+      if (cancelacionSolicitada.current && records.length === 0) {
+        setStatusMessage('⏹ Transcripción cancelada por el usuario antes de procesar segmentos.');
         setProgress(0);
         setTelemetriaActual((prev) => ({
           ...prev,
           porcentaje: 0,
-          mensaje: '⏹ Transcripción cancelada por el usuario.',
+          mensaje: '⏹ Transcripción cancelada por el usuario antes de procesar segmentos.',
           tiempoEstimadoSegundos: 0,
         }));
       } else {
         setTranscriptionRecords(records);
         setHistorialBD(TranscriptionDatabase.obtenerTodas());
         setProgress(100);
-        const msgFinal = records.length === 1
-          ? `Transcripción completada con éxito con OpenAI Whisper. Archivos generados listos para descarga.`
-          : `${records.length} transcripciones completadas con éxito con OpenAI Whisper. Archivos generados listos para descarga.`;
+        const tieneParciales = records.some((r) => r.isPartial);
+        let msgFinal = '';
+        if (tieneParciales) {
+          const totalSegs = records.reduce((acc, r) => acc + (r.rawSegments?.length || 0), 0);
+          msgFinal = `⚠️ Transcripción parcial generada con éxito hasta donde se procesó (${totalSegs} segmentos rescatados). Archivos guardados.`;
+        } else {
+          msgFinal = records.length === 1
+            ? `Transcripción completada con éxito con OpenAI Whisper. Archivos generados listos para descarga.`
+            : `${records.length} transcripciones completadas con éxito con OpenAI Whisper. Archivos generados listos para descarga.`;
+        }
         setStatusMessage(msgFinal);
         setTelemetriaActual((prev) => ({
           ...prev,
@@ -674,7 +706,7 @@ export default function ClassicTranscriptionView(): React.ReactElement {
         }));
       }
     } catch (err: any) {
-      if (cancelacionSolicitada.current) {
+      if (cancelacionSolicitada.current && records.length === 0) {
         setStatusMessage('⏹ Transcripción cancelada por el usuario.');
         setProgress(0);
         setTelemetriaActual((prev) => ({
@@ -684,7 +716,7 @@ export default function ClassicTranscriptionView(): React.ReactElement {
           tiempoEstimadoSegundos: 0,
         }));
       } else {
-        console.error('Error durante la transcripción:', err);
+        console.error('Aviso durante la transcripción:', err);
         const msg = err?.message || String(err);
         setStatusMessage(`❌ Error en la transcripción: ${msg}`);
         setTelemetriaActual((prev) => ({
@@ -693,7 +725,17 @@ export default function ClassicTranscriptionView(): React.ReactElement {
           mensaje: `❌ Error en la transcripción: ${msg}`,
           tiempoEstimadoSegundos: 0,
         }));
-        alert(`No se pudo completar la transcripción con OpenAI Whisper:\n\n${msg}`);
+
+        if (typeof window !== 'undefined' && (window as any).__TAURI__?.invoke) {
+          try {
+            (window as any).__TAURI__.invoke('registrar_error_log', {
+              componente: 'ClassicTranscriptionView',
+              mensaje: msg,
+              contexto: navigator.userAgent,
+              rutaAudio: files.length > 0 ? (files[0] as any).path || files[0].name : null,
+            });
+          } catch {}
+        }
       }
     } finally {
       setIsRunning(false);
@@ -735,32 +777,61 @@ export default function ClassicTranscriptionView(): React.ReactElement {
           </p>
         </div>
 
-        <button
-          onClick={() => setModalModelosAbierto(true)}
-          className="top-control-btn"
-          style={{
-            backgroundColor: 'rgba(255, 255, 255, 0.06)',
-            color: '#FFFFFF',
-            border: '1px solid rgba(255, 255, 255, 0.35)',
-            borderRadius: THEME_TOKENS.radii.sm,
-            fontSize: '0.8125rem',
-            fontWeight: 500,
-            cursor: 'pointer',
-            whiteSpace: 'nowrap',
-            padding: '0.5rem 1rem',
-            transition: `all ${THEME_TOKENS.transitions.fast}`,
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.15)';
-            e.currentTarget.style.borderColor = '#FFFFFF';
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.06)';
-            e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.35)';
-          }}
-        >
-          ⚙️ Gestionar modelos
-        </button>
+        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+          <button
+            onClick={handleAbrirCarpetaLogs}
+            className="top-control-btn"
+            title="Abrir carpeta de registros técnicos y diagnósticos del sistema"
+            style={{
+              backgroundColor: 'rgba(255, 255, 255, 0.06)',
+              color: '#FFFFFF',
+              border: '1px solid rgba(255, 255, 255, 0.35)',
+              borderRadius: THEME_TOKENS.radii.sm,
+              fontSize: '0.8125rem',
+              fontWeight: 500,
+              cursor: 'pointer',
+              whiteSpace: 'nowrap',
+              padding: '0.5rem 0.85rem',
+              transition: `all ${THEME_TOKENS.transitions.fast}`,
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.15)';
+              e.currentTarget.style.borderColor = '#FFFFFF';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.06)';
+              e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.35)';
+            }}
+          >
+            📋 Logs de errores
+          </button>
+          <button
+            onClick={() => setModalModelosAbierto(true)}
+            className="top-control-btn"
+            style={{
+              backgroundColor: 'rgba(255, 255, 255, 0.06)',
+              color: '#FFFFFF',
+              border: '1px solid rgba(255, 255, 255, 0.35)',
+              borderRadius: THEME_TOKENS.radii.sm,
+              fontSize: '0.8125rem',
+              fontWeight: 500,
+              cursor: 'pointer',
+              whiteSpace: 'nowrap',
+              padding: '0.5rem 1rem',
+              transition: `all ${THEME_TOKENS.transitions.fast}`,
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.15)';
+              e.currentTarget.style.borderColor = '#FFFFFF';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.06)';
+              e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.35)';
+            }}
+          >
+            ⚙️ Gestionar modelos
+          </button>
+        </div>
       </div>
 
       {/* Contenedor de Ruta para Guardar Transcripciones (Mismo estilo que la ruta oficial) */}

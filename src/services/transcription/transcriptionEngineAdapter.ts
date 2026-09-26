@@ -81,6 +81,11 @@ export class TranscriptionEngineAdapter implements ITranscriptionEngine {
       txtContent: resultadoAcustico.txtContent || '',
       srtContent: resultadoAcustico.srtContent || '',
       completedAt: ahoraIso,
+      isPartial: resultadoAcustico.isPartial,
+      wasCancelled: resultadoAcustico.wasCancelled,
+      status: resultadoAcustico.status,
+      errorMotivo: resultadoAcustico.errorMotivo,
+      logPath: resultadoAcustico.logPath,
     };
   }
 

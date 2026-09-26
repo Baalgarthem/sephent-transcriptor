@@ -20,6 +20,12 @@ export interface ResultadoWhisper {
   modelUsed: string;
   language: string;
   numSpeakers: number;
+  isPartial?: boolean;
+  wasCancelled?: boolean;
+  status?: 'completado' | 'parcial' | 'error';
+  error?: string;
+  errorMotivo?: string;
+  logPath?: string;
 }
 
 import { WhisperPathService } from '../whisperPathService';
@@ -118,7 +124,7 @@ export class WhisperBridgeService {
       }
 
       const parsed = JSON.parse(textoJson);
-      if (parsed.error) {
+      if (parsed.error && (!parsed.segments || parsed.segments.length === 0)) {
         throw new Error(`Error de transcripción: ${parsed.error}`);
       }
 

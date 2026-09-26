@@ -18,6 +18,8 @@ import { WHISPER_MODELS } from '../../../config/whisperConfig';
 import { ModelManager } from '../../../services/modelManager';
 import { UserSettingsService } from '../../../services/userSettingsService';
 import { TranscriptionDatabase, StoredTranscription } from '../../../services/database/transcriptionDatabase';
+import { TranscriptionService } from '../../../services/transcription/transcriptionService';
+import { OutputPathService } from '../../../services/transcription/outputPathService';
 import { THEME_TOKENS } from '../../../config/themeTokens';
 import { TranscriptionProgressBar } from '../../../components/TranscriptionProgressBar';
 
@@ -122,10 +124,9 @@ export default function StreamlinedTranscriptionView(): React.ReactElement {
 
     try {
       for (let i = 0; i < archivos.length; i++) {
-        if (cancelacionSolicitada.current) break;
         const file = archivos[i];
 
-        await transcriptionEngine.transcribirArchivo(file, {
+        const resultadoAudio = await transcriptionEngine.transcribirArchivo(file, {
           modelo,
           idioma,
           diarizar,
@@ -144,9 +145,90 @@ export default function StreamlinedTranscriptionView(): React.ReactElement {
             }
           },
         });
+
+        const tieneSegmentos = resultadoAudio.rawSegments && resultadoAudio.rawSegments.length > 0;
+        if (cancelacionSolicitada.current && !tieneSegmentos) {
+          break;
+        }
+
+        const esParcial = !!resultadoAudio.isPartial;
+        const statusFinal: 'completado' | 'parcial' | 'error' = esParcial ? 'parcial' : 'completado';
+
+        const record = TranscriptionService.generateTranscriptionRecord(
+          file,
+          { txt: formatoTxt, srt: formatoSrt, video: formatoVideo },
+          { txt: resultadoAudio.txtContent, srt: resultadoAudio.srtContent }
+        );
+
+        const carpetaDestino = OutputPathService.resolverCarpetaDestino(file.name, 'default');
+        const salidasBD = record.outputs.map((out: any) => ({
+          format: out.formatId,
+          fileName: out.fileName,
+          fullPath: `${OutputPathService.obtenerRutaPorDefecto()}\\${out.fileName}`,
+        }));
+
+        if (typeof window !== 'undefined' && (window as any).__TAURI__?.invoke) {
+          const tauri = (window as any).__TAURI__;
+          for (const out of salidasBD) {
+            if (out.format === 'txt' && resultadoAudio.txtContent && out.fullPath) {
+              try {
+                await tauri.invoke('guardar_archivo_texto', {
+                  ruta: out.fullPath,
+                  contenido: resultadoAudio.txtContent,
+                });
+              } catch {}
+            } else if (out.format === 'srt' && resultadoAudio.srtContent && out.fullPath) {
+              try {
+                await tauri.invoke('guardar_archivo_texto', {
+                  ruta: out.fullPath,
+                  contenido: resultadoAudio.srtContent,
+                });
+              } catch {}
+            }
+          }
+        }
+
+        TranscriptionDatabase.guardar({
+          fileName: file.name,
+          fileType: 'audio',
+          fileSizeFormatted: `${(file.size / (1024 * 1024)).toFixed(1)} MB`,
+          modelUsed: WHISPER_MODELS[modelo]?.nombreVisible || modelo,
+          language: idioma === 'auto' ? 'Detección automática' : idioma.toUpperCase(),
+          destinationType: 'default',
+          destinationFolder: carpetaDestino,
+          outputs: salidasBD,
+          status: statusFinal,
+          isPartial: esParcial,
+          wasCancelled: resultadoAudio.wasCancelled,
+          errorMotivo: resultadoAudio.errorMotivo,
+          logPath: resultadoAudio.logPath,
+          rawSegments: resultadoAudio.rawSegments,
+          textContent: resultadoAudio.txtContent,
+          srtContent: resultadoAudio.srtContent,
+          speakerNames: resultadoAudio.speakerNames,
+        });
+
+        if (cancelacionSolicitada.current) {
+          break;
+        }
       }
     } catch (err: any) {
-      alert(`Error durante la transcripción: ${err?.message || err}`);
+      console.error('Error durante la transcripción en vista ágil:', err);
+      const msg = err?.message || String(err);
+      if (typeof window !== 'undefined' && (window as any).__TAURI__?.invoke) {
+        try {
+          (window as any).__TAURI__.invoke('registrar_error_log', {
+            componente: 'StreamlinedTranscriptionView',
+            mensaje: msg,
+            contexto: navigator.userAgent,
+            rutaAudio: archivos.length > 0 ? (archivos[0] as any).path || archivos[0].name : null,
+          });
+        } catch {}
+      }
+      setTelemetria((prev) => ({
+        ...prev,
+        mensaje: `❌ Error en transcripción: ${msg}`,
+      }));
     } finally {
       setEnEjecucion(false);
       setCancelando(false);
@@ -161,6 +243,18 @@ export default function StreamlinedTranscriptionView(): React.ReactElement {
     try {
       await transcriptionEngine.cancelar();
     } catch {}
+  };
+
+  const handleAbrirCarpetaLogs = async () => {
+    if (typeof window !== 'undefined' && (window as any).__TAURI__?.invoke) {
+      try {
+        await (window as any).__TAURI__.invoke('abrir_carpeta_logs');
+      } catch {
+        alert('No se pudo abrir automáticamente la carpeta de registros.');
+      }
+    } else {
+      alert('La apertura de la carpeta de registros está disponible en la versión de escritorio.');
+    }
   };
 
   const descargarArchivo = (contenido: string, nombre: string, mime: string) => {
@@ -202,6 +296,21 @@ export default function StreamlinedTranscriptionView(): React.ReactElement {
           </h2>
         </div>
         <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+          <button
+            onClick={handleAbrirCarpetaLogs}
+            title="Abrir carpeta de registros de errores"
+            style={{
+              backgroundColor: 'rgba(255, 255, 255, 0.08)',
+              color: '#CBD5E1',
+              border: '1px solid rgba(255, 255, 255, 0.2)',
+              borderRadius: THEME_TOKENS.radii.sm,
+              padding: '0.25rem 0.65rem',
+              fontSize: '0.75rem',
+              cursor: 'pointer',
+            }}
+          >
+            📋 Logs
+          </button>
           <span
             style={{
               fontSize: '0.75rem',

@@ -24,7 +24,11 @@ export interface StoredTranscription {
   destinationType: 'default' | 'original';
   destinationFolder: string;
   outputs: SalidaGeneradaInfo[];
-  status: 'completado';
+  status: 'completado' | 'parcial' | 'error';
+  isPartial?: boolean;
+  wasCancelled?: boolean;
+  errorMotivo?: string;
+  logPath?: string;
   speakerNames?: Record<string, string>;
   speakerRoles?: Record<string, string>;
   speakers?: Record<string, any>;
