@@ -1,12 +1,25 @@
 import React from 'react';
-import TranscriptionPanel from './components/TranscriptionPanel';
+import { GUIRenderer } from './gui/components/GUIRenderer';
+import { GUISwitcher } from './gui/components/GUISwitcher';
 import { THEME_TOKENS } from './config/themeTokens';
 import sephentLogo from './assets/sephent-3.svg';
 
 const App: React.FC = () => {
   return (
     <div className="app-viewport">
-      <header className="app-header">
+      <header className="app-header" style={{ position: 'relative' }}>
+        {/* Selector de Interfaz Gráfica Pluggable (Inyección de Dependencias) */}
+        <div
+          style={{
+            position: 'absolute',
+            top: '0.85rem',
+            right: '1.25rem',
+            zIndex: 50,
+          }}
+        >
+          <GUISwitcher />
+        </div>
+
         <div
           style={{
             display: 'flex',
@@ -74,7 +87,8 @@ const App: React.FC = () => {
       </header>
 
       <main className="app-main">
-        <TranscriptionPanel />
+        {/* Renderizado dinámico de la interfaz gráfica activa resuelta vía DI */}
+        <GUIRenderer />
       </main>
     </div>
   );

@@ -69,6 +69,7 @@ async function ejecutarPruebas() {
   afirmar(appCont.has(DI_TOKENS.PERICIAL_SERVICE), 'IPericialService registrado en Composition Root');
   afirmar(appCont.has(DI_TOKENS.TELEMETRY_SERVICE), 'ITelemetryService registrado en Composition Root');
   afirmar(appCont.has(DI_TOKENS.MODEL_STORAGE), 'IModelStorageService registrado en Composition Root');
+  afirmar(appCont.has(DI_TOKENS.GUI_MANAGER), 'IGUIManager registrado en Composition Root');
 
   // 5. Verificación de ITelemetryService (Cálculo de ETA y progreso)
   console.log('\n⏱️ 5. Validando Servicio de Telemetría (ITelemetryService)...');

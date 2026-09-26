@@ -1,0 +1,565 @@
+/**
+ * StreamlinedTranscriptionView — Interfaz Gráfica Moderna y Rápida (Estilo Arturo)
+ * 
+ * Implementación alternativa de IGUIView que demuestra la capacidad de alternar
+ * entre múltiples tecnologías y paradigmas gráficos sin alterar el motor ni los servicios.
+ * 
+ * Enfoque: Minimalista, centrado en productividad ágil, diarización activa por defecto,
+ * telemetría interactiva de alta resolución con ETA y exportación inmediata.
+ */
+
+import React, { useState, useEffect, useRef, ChangeEvent } from 'react';
+import { useService } from '../../../core/di/DIContext';
+import { DI_TOKENS } from '../../../core/di/tokens';
+import { ITranscriptionEngine, TelemetriaTranscripcion } from '../../../core/contracts/ITranscriptionEngine';
+import { ITelemetryService } from '../../../core/contracts/ITelemetryService';
+import { IPericialService } from '../../../core/contracts/IPericialService';
+import { WHISPER_MODELS } from '../../../config/whisperConfig';
+import { ModelManager } from '../../../services/modelManager';
+import { UserSettingsService } from '../../../services/userSettingsService';
+import { TranscriptionDatabase, StoredTranscription } from '../../../services/database/transcriptionDatabase';
+import { THEME_TOKENS } from '../../../config/themeTokens';
+import { TranscriptionProgressBar } from '../../../components/TranscriptionProgressBar';
+
+type ModelKey = keyof typeof WHISPER_MODELS;
+
+export default function StreamlinedTranscriptionView(): React.ReactElement {
+  // Inyección de dependencias
+  const transcriptionEngine = useService<ITranscriptionEngine>(DI_TOKENS.TRANSCRIPTION_ENGINE);
+  const telemetryService = useService<ITelemetryService>(DI_TOKENS.TELEMETRY_SERVICE);
+  const pericialService = useService<IPericialService>(DI_TOKENS.PERICIAL_SERVICE);
+
+  const configInicial = UserSettingsService.obtenerConfiguracion();
+
+  // Estados de la sesión
+  const [archivos, setArchivos] = useState<File[]>([]);
+  const [modelo, setModelo] = useState<ModelKey>(() => {
+    try {
+      const def = ModelManager.resolverModeloPorDefecto();
+      if (def) return def as ModelKey;
+    } catch {}
+    return (configInicial.modelo as ModelKey) || 'small';
+  });
+  const [idioma, setIdioma] = useState<string>(configInicial.idioma || 'auto');
+  const [diarizar, setDiarizar] = useState<boolean>(configInicial.diarizarHablantes ?? true);
+  const [formatoTxt, setFormatoTxt] = useState<boolean>(configInicial.outputTxt);
+  const [formatoSrt, setFormatoSrt] = useState<boolean>(configInicial.outputSrt);
+  const [formatoVideo, setFormatoVideo] = useState<boolean>(configInicial.outputVideo);
+
+  // Estados de ejecución
+  const [enEjecucion, setEnEjecucion] = useState(false);
+  const [cancelando, setCancelando] = useState(false);
+  const cancelacionSolicitada = useRef(false);
+  const [telemetria, setTelemetria] = useState<{
+    porcentaje: number;
+    etapaActual: number;
+    totalEtapas: number;
+    mensaje: string;
+    tiempoEstimadoSegundos: number;
+    velocidadFactor: number;
+    nombreArchivo?: string;
+  }>({
+    porcentaje: 0,
+    etapaActual: 0,
+    totalEtapas: 4,
+    mensaje: '',
+    tiempoEstimadoSegundos: 0,
+    velocidadFactor: 1.0,
+  });
+
+  const [ultimasTranscripciones, setUltimasTranscripciones] = useState<StoredTranscription[]>([]);
+  const [isDragOver, setIsDragOver] = useState(false);
+
+  // Cargar historial reciente
+  useEffect(() => {
+    setUltimasTranscripciones(TranscriptionDatabase.obtenerTodas().slice(0, 5));
+  }, [enEjecucion]);
+
+  const handleSeleccionarArchivos = (e: ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      const nuevos = Array.from(e.target.files);
+      setArchivos((prev) => [...prev, ...nuevos]);
+      e.target.value = '';
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragOver(false);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      const nuevos = Array.from(e.dataTransfer.files);
+      setArchivos((prev) => [...prev, ...nuevos]);
+    }
+  };
+
+  const handleIniciar = async () => {
+    if (archivos.length === 0) {
+      alert('Por favor agrega al menos un archivo de audio o video.');
+      return;
+    }
+
+    if (!formatoTxt && !formatoSrt && !formatoVideo) {
+      alert('Selecciona al menos un formato de salida documental (.txt o .srt).');
+      return;
+    }
+
+    cancelacionSolicitada.current = false;
+    setCancelando(false);
+    setEnEjecucion(true);
+    const totalEtapas = diarizar ? 4 : 3;
+    telemetryService.iniciarSesion(totalEtapas, 0);
+
+    setTelemetria({
+      porcentaje: 5,
+      etapaActual: 1,
+      totalEtapas,
+      mensaje: `Iniciando modelo ${modelo} en modo ágil...`,
+      tiempoEstimadoSegundos: 0,
+      velocidadFactor: 1.0,
+      nombreArchivo: archivos[0].name,
+    });
+
+    try {
+      for (let i = 0; i < archivos.length; i++) {
+        if (cancelacionSolicitada.current) break;
+        const file = archivos[i];
+
+        await transcriptionEngine.transcribirArchivo(file, {
+          modelo,
+          idioma,
+          diarizar,
+          onProgreso: (t: TelemetriaTranscripcion) => {
+            if (!cancelacionSolicitada.current) {
+              setTelemetria({
+                porcentaje: t.porcentaje,
+                etapaActual: t.etapaActual,
+                totalEtapas: t.totalEtapas,
+                mensaje: t.mensaje,
+                tiempoEstimadoSegundos: t.tiempoEstimadoSegundos || 0,
+                velocidadFactor: t.velocidadFactor || 1.0,
+                nombreArchivo: file.name,
+              });
+            }
+          },
+        });
+      }
+    } catch (err: any) {
+      alert(`Error durante la transcripción: ${err?.message || err}`);
+    } finally {
+      setEnEjecucion(false);
+      setCancelando(false);
+      setUltimasTranscripciones(TranscriptionDatabase.obtenerTodas().slice(0, 5));
+    }
+  };
+
+  const handleCancelar = async () => {
+    if (!enEjecucion || cancelando) return;
+    setCancelando(true);
+    cancelacionSolicitada.current = true;
+    try {
+      await transcriptionEngine.cancelar();
+    } catch {}
+  };
+
+  const descargarArchivo = (contenido: string, nombre: string, mime: string) => {
+    try {
+      const blob = new Blob([contenido], { type: `${mime};charset=utf-8` });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = nombre;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      alert('No se pudo descargar el archivo.');
+    }
+  };
+
+  return (
+    <div style={{ maxWidth: '1000px', margin: '0 auto', padding: '1rem', fontFamily: THEME_TOKENS.fonts.sans }}>
+      {/* Banner de Modo Streamlined */}
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          backgroundColor: '#1E293B',
+          color: '#F8FAFC',
+          padding: '0.85rem 1.25rem',
+          borderRadius: THEME_TOKENS.radii.md,
+          marginBottom: '1.5rem',
+          boxShadow: THEME_TOKENS.shadows.md,
+        }}
+      >
+        <div>
+          <span style={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.08em', color: '#94A3B8' }}>
+            ⚡ Interfaz Gráfica Alternativa (Pluggable DI)
+          </span>
+          <h2 style={{ margin: '0.2rem 0 0 0', fontSize: '1.25rem', fontWeight: 600 }}>
+            Modo Rápido & Diarización Directa
+          </h2>
+        </div>
+        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+          <span
+            style={{
+              fontSize: '0.75rem',
+              backgroundColor: 'rgba(56, 189, 248, 0.15)',
+              color: '#38BDF8',
+              border: '1px solid rgba(56, 189, 248, 0.3)',
+              padding: '0.25rem 0.65rem',
+              borderRadius: THEME_TOKENS.radii.pill,
+              fontWeight: 500,
+            }}
+          >
+            React Streamlined
+          </span>
+        </div>
+      </div>
+
+      {/* Panel de Configuración Rápida en 1 Fila */}
+      <div
+        style={{
+          backgroundColor: THEME_TOKENS.colors.surfaceBase,
+          border: `1px solid ${THEME_TOKENS.colors.borderSubtle}`,
+          borderRadius: THEME_TOKENS.radii.md,
+          padding: '1.25rem',
+          marginBottom: '1.5rem',
+          boxShadow: THEME_TOKENS.shadows.sm,
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+          gap: '1rem',
+          alignItems: 'center',
+        }}
+      >
+        {/* Selector de Modelo */}
+        <div>
+          <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: THEME_TOKENS.colors.textSecondary, marginBottom: '0.35rem' }}>
+            🧠 Modelo Whisper:
+          </label>
+          <select
+            value={modelo}
+            onChange={(e) => {
+              const m = e.target.value as ModelKey;
+              setModelo(m);
+              UserSettingsService.guardarConfiguracion({ modelo: m });
+            }}
+            disabled={enEjecucion}
+            style={{
+              width: '100%',
+              padding: '0.55rem',
+              borderRadius: THEME_TOKENS.radii.sm,
+              border: `1px solid ${THEME_TOKENS.colors.borderStrong}`,
+              backgroundColor: THEME_TOKENS.colors.surfaceBase,
+              fontSize: '0.85rem',
+            }}
+          >
+            {Object.keys(WHISPER_MODELS).map((k) => (
+              <option key={k} value={k}>
+                {WHISPER_MODELS[k as ModelKey].nombreVisible} ({WHISPER_MODELS[k as ModelKey].tamanoAproximadoMB} MB)
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {/* Selector de Idioma */}
+        <div>
+          <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: THEME_TOKENS.colors.textSecondary, marginBottom: '0.35rem' }}>
+            🌐 Idioma del Audio:
+          </label>
+          <select
+            value={idioma}
+            onChange={(e) => {
+              setIdioma(e.target.value);
+              UserSettingsService.guardarConfiguracion({ idioma: e.target.value as any });
+            }}
+            disabled={enEjecucion}
+            style={{
+              width: '100%',
+              padding: '0.55rem',
+              borderRadius: THEME_TOKENS.radii.sm,
+              border: `1px solid ${THEME_TOKENS.colors.borderStrong}`,
+              backgroundColor: THEME_TOKENS.colors.surfaceBase,
+              fontSize: '0.85rem',
+            }}
+          >
+            <option value="auto">🌐 Detectar Automáticamente</option>
+            <option value="es">🇪🇸 Español</option>
+            <option value="en">🇺🇸 Inglés</option>
+            <option value="fr">🇫🇷 Francés</option>
+            <option value="de">🇩🇪 Alemán</option>
+            <option value="pt">🇵🇹 Portugués</option>
+            <option value="it">🇮🇹 Italiano</option>
+          </select>
+        </div>
+
+        {/* Diarización Toggle (Por defecto TRUE) */}
+        <div>
+          <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: THEME_TOKENS.colors.textSecondary, marginBottom: '0.35rem' }}>
+            👥 Diarización (Hablantes):
+          </label>
+          <label
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+              cursor: enEjecucion ? 'not-allowed' : 'pointer',
+              padding: '0.45rem 0.75rem',
+              backgroundColor: diarizar ? 'rgba(34, 197, 94, 0.1)' : 'rgba(100, 116, 139, 0.1)',
+              border: `1px solid ${diarizar ? 'rgba(34, 197, 94, 0.4)' : 'rgba(100, 116, 139, 0.3)'}`,
+              borderRadius: THEME_TOKENS.radii.sm,
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={diarizar}
+              onChange={(e) => {
+                setDiarizar(e.target.checked);
+                UserSettingsService.guardarConfiguracion({ diarizarHablantes: e.target.checked });
+              }}
+              disabled={enEjecucion}
+              style={{ cursor: 'pointer', accentColor: '#16a34a' }}
+            />
+            <span style={{ fontSize: '0.825rem', fontWeight: 600, color: diarizar ? '#15803d' : '#64748b' }}>
+              {diarizar ? '✓ Activada (Quién habla cuándo)' : '✕ Desactivada (Solo texto plano)'}
+            </span>
+          </label>
+        </div>
+
+        {/* Formatos Salida */}
+        <div>
+          <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: THEME_TOKENS.colors.textSecondary, marginBottom: '0.35rem' }}>
+            📄 Formatos de Salida:
+          </label>
+          <div style={{ display: 'flex', gap: '0.5rem' }}>
+            <label style={{ fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.25rem', cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={formatoTxt}
+                onChange={(e) => {
+                  setFormatoTxt(e.target.checked);
+                  UserSettingsService.guardarConfiguracion({ outputTxt: e.target.checked });
+                }}
+                disabled={enEjecucion}
+              />
+              .TXT
+            </label>
+            <label style={{ fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.25rem', cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={formatoSrt}
+                onChange={(e) => {
+                  setFormatoSrt(e.target.checked);
+                  UserSettingsService.guardarConfiguracion({ outputSrt: e.target.checked });
+                }}
+                disabled={enEjecucion}
+              />
+              .SRT
+            </label>
+          </div>
+        </div>
+      </div>
+
+      {/* Zona de Carga Rápida (Dropzone) */}
+      <div
+        onDragOver={(e) => {
+          e.preventDefault();
+          setIsDragOver(true);
+        }}
+        onDragLeave={() => setIsDragOver(false)}
+        onDrop={handleDrop}
+        style={{
+          border: `2px dashed ${isDragOver ? '#38BDF8' : THEME_TOKENS.colors.borderStrong}`,
+          backgroundColor: isDragOver ? 'rgba(56, 189, 248, 0.05)' : THEME_TOKENS.colors.surfaceCard,
+          borderRadius: THEME_TOKENS.radii.lg,
+          padding: '2rem 1.5rem',
+          textAlign: 'center',
+          marginBottom: '1.5rem',
+          transition: 'all 0.2s ease',
+        }}
+      >
+        <div style={{ fontSize: '2.5rem', marginBottom: '0.5rem' }}>🎙️</div>
+        <h3 style={{ margin: '0 0 0.5rem 0', fontSize: '1.1rem', color: THEME_TOKENS.colors.textPrimary }}>
+          Arrastra audios o videos aquí para procesar
+        </h3>
+        <p style={{ margin: '0 0 1rem 0', fontSize: '0.85rem', color: THEME_TOKENS.colors.textSecondary }}>
+          Formatos compatibles: MP3, WAV, M4A, OGG, FLAC, MP4, MKV, AVI, WEBM
+        </p>
+
+        <label
+          style={{
+            display: 'inline-block',
+            backgroundColor: THEME_TOKENS.colors.accentPrimary,
+            color: '#FFFFFF',
+            padding: '0.55rem 1.25rem',
+            borderRadius: THEME_TOKENS.radii.sm,
+            fontSize: '0.85rem',
+            fontWeight: 600,
+            cursor: 'pointer',
+          }}
+        >
+          📂 Seleccionar Archivos
+          <input
+            type="file"
+            multiple
+            accept="audio/*,video/*"
+            onChange={handleSeleccionarArchivos}
+            style={{ display: 'none' }}
+          />
+        </label>
+
+        {archivos.length > 0 && (
+          <div style={{ marginTop: '1.25rem', textAlign: 'left', backgroundColor: THEME_TOKENS.colors.surfaceBase, padding: '0.75rem 1rem', borderRadius: THEME_TOKENS.radii.sm, border: `1px solid ${THEME_TOKENS.colors.borderSubtle}` }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+              <strong style={{ fontSize: '0.825rem' }}>Archivos listos para procesar ({archivos.length}):</strong>
+              <button
+                onClick={() => setArchivos([])}
+                disabled={enEjecucion}
+                style={{ background: 'none', border: 'none', color: '#EF4444', fontSize: '0.75rem', cursor: 'pointer' }}
+              >
+                Limpiar cola
+              </button>
+            </div>
+            <ul style={{ margin: 0, paddingLeft: '1.25rem', fontSize: '0.8rem', color: THEME_TOKENS.colors.textSecondary }}>
+              {archivos.map((f, idx) => (
+                <li key={idx} style={{ marginBottom: '0.2rem' }}>
+                  {f.name} ({(f.size / (1024 * 1024)).toFixed(2)} MB)
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
+
+      {/* Barra de Progreso y Telemetría en Vivo */}
+      {enEjecucion && (
+        <div style={{ marginBottom: '1.5rem' }}>
+          <TranscriptionProgressBar
+            porcentaje={telemetria.porcentaje}
+            etapaActual={telemetria.etapaActual}
+            totalEtapas={telemetria.totalEtapas}
+            mensaje={telemetria.mensaje}
+            tiempoEstimadoSegundos={telemetria.tiempoEstimadoSegundos}
+            velocidadFactor={telemetria.velocidadFactor}
+            nombreArchivo={telemetria.nombreArchivo}
+          />
+        </div>
+      )}
+
+      {/* Botones de Acción Primaria */}
+      <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center', marginBottom: '2rem' }}>
+        <button
+          onClick={handleIniciar}
+          disabled={enEjecucion || archivos.length === 0}
+          style={{
+            backgroundColor: enEjecucion ? '#94A3B8' : '#0F172A',
+            color: '#FFFFFF',
+            padding: '0.75rem 2.5rem',
+            borderRadius: THEME_TOKENS.radii.sm,
+            fontSize: '0.95rem',
+            fontWeight: 700,
+            border: 'none',
+            cursor: enEjecucion || archivos.length === 0 ? 'not-allowed' : 'pointer',
+            boxShadow: THEME_TOKENS.shadows.md,
+            transition: 'all 0.15s ease',
+          }}
+        >
+          {enEjecucion ? 'Procesando Transcripción...' : '🚀 Iniciar Transcripción'}
+        </button>
+
+        {enEjecucion && (
+          <button
+            onClick={handleCancelar}
+            disabled={cancelando}
+            style={{
+              backgroundColor: '#EF4444',
+              color: '#FFFFFF',
+              padding: '0.75rem 1.5rem',
+              borderRadius: THEME_TOKENS.radii.sm,
+              fontSize: '0.9rem',
+              fontWeight: 600,
+              border: 'none',
+              cursor: 'pointer',
+            }}
+          >
+            {cancelando ? 'Cancelando...' : '⏹ Cancelar'}
+          </button>
+        )}
+      </div>
+
+      {/* Historial Reciente Rápido */}
+      {ultimasTranscripciones.length > 0 && (
+        <div
+          style={{
+            backgroundColor: THEME_TOKENS.colors.surfaceBase,
+            border: `1px solid ${THEME_TOKENS.colors.borderSubtle}`,
+            borderRadius: THEME_TOKENS.radii.md,
+            padding: '1.25rem',
+          }}
+        >
+          <h4 style={{ margin: '0 0 0.85rem 0', fontSize: '0.95rem', color: THEME_TOKENS.colors.textPrimary }}>
+            📂 Transcripciones Recientes en Base de Datos
+          </h4>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
+            {ultimasTranscripciones.map((t) => (
+              <div
+                key={t.id}
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  padding: '0.65rem 0.85rem',
+                  backgroundColor: THEME_TOKENS.colors.surfaceCard,
+                  borderRadius: THEME_TOKENS.radii.sm,
+                  border: `1px solid ${THEME_TOKENS.colors.borderSubtle}`,
+                  flexWrap: 'wrap',
+                  gap: '0.5rem',
+                }}
+              >
+                <div>
+                  <strong style={{ fontSize: '0.85rem', color: THEME_TOKENS.colors.textPrimary }}>
+                    {t.fileName}
+                  </strong>
+                  <span style={{ fontSize: '0.75rem', color: THEME_TOKENS.colors.textMuted, marginLeft: '0.65rem' }}>
+                    {t.date} · Modelo: {t.modelUsed} · {t.rawSegments?.length || 0} fragmentos
+                  </span>
+                </div>
+                <div style={{ display: 'flex', gap: '0.45rem' }}>
+                  {t.textContent && (
+                    <button
+                      onClick={() => descargarArchivo(t.textContent || '', `${t.fileName}.txt`, 'text/plain')}
+                      style={{
+                        padding: '0.3rem 0.65rem',
+                        fontSize: '0.75rem',
+                        borderRadius: THEME_TOKENS.radii.xs,
+                        border: `1px solid ${THEME_TOKENS.colors.borderStrong}`,
+                        backgroundColor: THEME_TOKENS.colors.surfaceBase,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      ↓ TXT
+                    </button>
+                  )}
+                  {t.srtContent && (
+                    <button
+                      onClick={() => descargarArchivo(t.srtContent || '', `${t.fileName}.srt`, 'text/plain')}
+                      style={{
+                        padding: '0.3rem 0.65rem',
+                        fontSize: '0.75rem',
+                        borderRadius: THEME_TOKENS.radii.xs,
+                        border: `1px solid ${THEME_TOKENS.colors.borderStrong}`,
+                        backgroundColor: THEME_TOKENS.colors.surfaceBase,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      ↓ SRT
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

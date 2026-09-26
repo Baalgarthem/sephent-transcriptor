@@ -38,6 +38,7 @@ export interface ConfiguracionUsuario {
   rutaModelosPersonalizada?: string | null;
   rolesPersonalizados?: string[];
   mostrarRolEnNombre?: boolean;
+  interfazGraficaId?: string;
 }
 
 export class UserSettingsService {
@@ -54,6 +55,7 @@ export class UserSettingsService {
     modoDestino: 'default',
     rolesPersonalizados: [],
     mostrarRolEnNombre: false,
+    interfazGraficaId: 'classic',
   };
 
   private static memoriaConfiguracion: ConfiguracionUsuario | null = null;
@@ -100,6 +102,7 @@ export class UserSettingsService {
         : (WhisperPathService.obtenerRutaOficialPorDefecto().esRutaPersonalizada ? WhisperPathService.obtenerRutaOficialPorDefecto().rutaPorDefectoOficial : null),
       rolesPersonalizados: rolesPersistidos,
       mostrarRolEnNombre: typeof configRecuperada.mostrarRolEnNombre === 'boolean' ? configRecuperada.mostrarRolEnNombre : this.configuracionPorDefecto.mostrarRolEnNombre,
+      interfazGraficaId: configRecuperada.interfazGraficaId || this.configuracionPorDefecto.interfazGraficaId,
     };
 
     this.memoriaConfiguracion = configFinal;

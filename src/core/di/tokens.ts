@@ -10,6 +10,7 @@ export const DI_TOKENS = {
   PERICIAL_SERVICE: 'IPericialService',
   TELEMETRY_SERVICE: 'ITelemetryService',
   USER_SETTINGS: 'IUserSettingsService',
+  GUI_MANAGER: 'IGUIManager',
 } as const;
 
 export type DITokenKey = keyof typeof DI_TOKENS;

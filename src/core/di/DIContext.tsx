@@ -8,7 +8,7 @@
 import React, { createContext, useContext, ReactNode } from 'react';
 import { DIContainer, appContainer } from './container';
 
-const DIContext = createContext<DIContainer>(appContainer);
+const DIContext = createContext<DIContainer | null>(null);
 
 export interface DIProviderProps {
   container?: DIContainer;
@@ -16,17 +16,17 @@ export interface DIProviderProps {
 }
 
 export const DIProvider: React.FC<DIProviderProps> = ({
-  container = appContainer,
+  container,
   children,
 }) => {
-  return <DIContext.Provider value={container}>{children}</DIContext.Provider>;
+  return <DIContext.Provider value={container || appContainer}>{children}</DIContext.Provider>;
 };
 
 /**
  * Hook para inyectar un servicio a partir de su token de contrato.
  */
 export function useService<T>(token: string): T {
-  const container = useContext(DIContext);
+  const container = useContext(DIContext) || appContainer;
   if (!container) {
     throw new Error(`[useService] DIContext no inicializado para el token: "${token}"`);
   }
@@ -37,7 +37,7 @@ export function useService<T>(token: string): T {
  * Hook para inyectar un servicio opcional sin lanzar error si no está registrado.
  */
 export function useOptionalService<T>(token: string): T | null {
-  const container = useContext(DIContext);
+  const container = useContext(DIContext) || appContainer;
   if (!container || !container.has(token)) {
     return null;
   }
