@@ -2,7 +2,40 @@
 
 Este documento registra cronológicamente cada cambio, decisión de diseño y evento relevante ocurrido en el proyecto **Sephent Transcriptor**, de acuerdo con las normas de trazabilidad de `AGENTS.md`.
 
-## [2026-09-17 23:10] - Corrección de Contraste del Botón "¿Cómo funciona?" y Textos en Rutas Superiores
+## [2026-09-26 12:45] - Versión 1.3.0: Inyección de Dependencias, Telemetría con ETA en Progreso y Desacoplamiento Pericial (Estilo Arturo)
+
+- **Responsable:** Agente Asistente (DeepMind / Antigravity).
+- **Motivo del cambio:** Directrices del usuario:
+  1. Refactorización para una lógica y estilo de programación enfocado a la inyección de dependencias (Estilo Arturo).
+  2. Adición de barra de progreso mejorada con % y tiempo estimado de completado (ETA) para dar certidumbre al usuario.
+  3. Aislamiento e inyección de todas las funciones de pericial y temas forenses en una funcionalidad aparte (`IPericialService`).
+  4. Mantener simple la pantalla principal, enfocada en transcripciones sencillas o diarizadas (estas últimas por defecto).
+  5. Soporte para mover los modelos de OpenAI Whisper a una carpeta personalizada por defecto evitando errores de permisos y llamadas erróneas.
+- **Detalle de la solución:**
+  1. **Arquitectura de Inyección de Dependencias (`src/core/`):**
+     - `ITranscriptionEngine`: Contrato acústico desacoplado con telemetría en tiempo real.
+     - `IPericialService`: Contrato para validación forense, integridad criptográfica y actas judiciales.
+     - `ITelemetryService`: Contrato para cálculo dinámico de ETA mediante suavizado exponencial (EMA) y factor de velocidad.
+     - `DIContainer` & `buildApplicationContainer()`: Composition Root fuertemente tipado con ciclo de vida Singleton y Transient.
+     - `DIProvider` y hook `useService<T>()`: Integración limpia con React Context.
+  2. **Barra de Progreso Mejorada (`TranscriptionProgressBar`):**
+     - Muestra porcentaje numérico prominente, barra animada a rayas, insignia de la etapa actual (1 a 4), tiempo transcurrido y cuenta regresiva de tiempo estimado (ETA `~mm:ss`).
+     - Botón de cancelación inmediata con confirmación y retroalimentación interactiva.
+     - Conectado a la telemetría en tiempo real del runner nativo de Whisper/Tauri (`transcripcion-progreso`).
+  3. **Aislamiento del Subsistema Pericial (`PericialService`):**
+     - La pantalla principal no impone bloqueos innecesarios a usuarios que solo desean transcripciones convencionales (`.txt`, `.srt`, `.mp4`).
+     - El botón superior `⚖️ Módulo Pericial Forense` y los botones contextuales de cada expediente abren el espacio de trabajo forense donde se validan interlocutores y se emite el acta inmutable con `emitirInformePericial()`.
+  4. **Relocalización Segura de Modelos Whisper (`ModelStorageService`):**
+     - Traslado atómico de archivos multi-gigabyte entre unidades de disco (`copy -> verify length -> rename target -> delete source`) previniendo fallos por `EXDEV`.
+     - Detección proactiva de carpetas de sistema restringidas y validación de permisos de escritura.
+  5. **Pruebas y Verificación:**
+     - `diContainer.test.ts`: 25 de 25 pruebas superadas exitosamente.
+     - `modelManager.test.ts`: 30 de 30 pruebas superadas exitosamente.
+     - Compilación limpia de Vite en ~1.1s y `cargo check` con 0 advertencias.
+  6. **Sincronización de Versión 1.3.0:**
+     - Actualizado en `package.json`, `src/config/appConfig.ts`, `src-tauri/Cargo.toml` y `src-tauri/tauri.conf.json`.
+
+---
 
 - **Responsable:** Agente Asistente (DeepMind / Antigravity).
 - **Motivo del cambio:** Directriz del usuario: *"El botón de cómo funciona, en la ruta para guartdar transcripciones tambien tiene texto que se pierde, aßí que corrigelo."*

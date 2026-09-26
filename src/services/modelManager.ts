@@ -14,6 +14,8 @@ import { WhisperPathService, InformacionRutaOficial } from './whisperPathService
 import { DuplicateDetector, ResultadoValidacionDuplicado } from './duplicateDetector';
 import { TranscriptionDatabase } from './database/transcriptionDatabase';
 import { invoke } from '@tauri-apps/api/tauri';
+import { ModelStorageServiceFactory } from './models/modelStorageService';
+import { ProgresoRelocalizacion, ResultadoRelocalizacion } from './models/modelStorageTypes';
 
 export interface ModeloInstaladoInfo {
   id: string;
@@ -556,6 +558,37 @@ export class ModelManager {
    */
   public static getModeloActivo(): string {
     return this.modeloActivoId;
+  }
+
+  /**
+   * Relocaliza los modelos descargados a una carpeta personalizada o restaura la oficial
+   * utilizando el servicio desacoplado y sincronizando el estado en disco.
+   */
+  public static async relocalizarModelosACarpeta(
+    nuevaRuta: string,
+    onProgreso?: (progreso: ProgresoRelocalizacion) => void
+  ): Promise<ResultadoRelocalizacion> {
+    const servicio = ModelStorageServiceFactory.obtenerServicio();
+    const resultado = await servicio.moverModelosACarpeta(nuevaRuta, onProgreso);
+    if (resultado.exito) {
+      await this.sincronizarModelosEnRutaOficial();
+    }
+    return resultado;
+  }
+
+  /**
+   * Restablece la ubicación oficial por defecto canónica de OpenAI Whisper.
+   */
+  public static async restablecerRutaOficial(
+    moverArchivosExistentes: boolean = true,
+    onProgreso?: (progreso: ProgresoRelocalizacion) => void
+  ): Promise<ResultadoRelocalizacion> {
+    const servicio = ModelStorageServiceFactory.obtenerServicio();
+    const resultado = await servicio.restablecerRutaOficial(moverArchivosExistentes, onProgreso);
+    if (resultado.exito) {
+      await this.sincronizarModelosEnRutaOficial();
+    }
+    return resultado;
   }
 }
 

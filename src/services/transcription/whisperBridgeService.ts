@@ -22,12 +22,15 @@ export interface ResultadoWhisper {
   numSpeakers: number;
 }
 
+import { WhisperPathService } from '../whisperPathService';
+
 export interface OpcionesWhisper {
   modelo: string;
   idioma: string;
   diarizar?: boolean;
+  rutaModelos?: string;
   numSpeakers?: number; // 0=auto, 1=monologo, 2=dialogo forzado
-  onProgreso?: (porcentaje: number, mensaje: string) => void;
+  onProgreso?: (porcentaje: number, mensaje: string, extra?: any) => void;
 }
 
 export class WhisperBridgeService {
@@ -74,7 +77,7 @@ export class WhisperBridgeService {
           if (payload && onProgreso) {
             const pct = typeof payload.porcentaje === 'number' ? payload.porcentaje : 50;
             const msg = payload.mensaje || 'Procesando con Whisper...';
-            onProgreso(pct, msg);
+            onProgreso(pct, msg, payload);
           }
         });
       } catch (e) {
@@ -83,11 +86,15 @@ export class WhisperBridgeService {
     }
 
     try {
+      const infoRuta = WhisperPathService.obtenerRutaOficialPorDefecto();
+      const rutaModelosEfectiva = opciones.rutaModelos || (infoRuta.esRutaPersonalizada ? infoRuta.rutaPorDefectoOficial : null);
+
       const jsonRes = await tauri.invoke('transcribir_audio_whisper', {
         rutaAudio: filePath,
         modelo,
         idioma: idioma || 'auto',
         diarizar,
+        rutaModelos: rutaModelosEfectiva,
       });
 
       if (unlisten) unlisten();

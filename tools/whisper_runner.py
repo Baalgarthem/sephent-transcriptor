@@ -1128,11 +1128,12 @@ def normalizar_audio_amplitud(audio_np: np.ndarray, target_peak: float = 0.95) -
 
 def transcribir(file_path: str, model_name: str, language: str,
                 num_speakers: int, device_override: str = "auto",
-                diarize: bool = True) -> dict:
+                diarize: bool = True, model_dir: str = None) -> dict:
     """
     Carga Whisper, transcribe y opcionalmente aplica diarización. Retorna dict ResultadoWhisper.
 
-    v0.2.0 - v1.1.1:
+    v0.2.0 - v1.2.0:
+      - Soporte para carpeta personalizada por defecto (download_root)
       - Diarización opcional: si diarize=False, genera transcripción continua rápida en 3 etapas.
       - Detección explícita de CUDA/GPU con fp16 automático
       - temperature=0 (greedy decoding) para mayor velocidad y determinismo
@@ -1156,7 +1157,11 @@ def transcribir(file_path: str, model_name: str, language: str,
 
     total_etapas = "4" if diarize else "3"
     print(f"[whisper_runner] ETAPA 1/{total_etapas}: Cargando modelo: {resolved_model} en {device_info}", file=sys.stderr, flush=True)
-    model = whisper.load_model(resolved_model, device=device)
+    if model_dir and os.path.isdir(model_dir):
+        print(f"[whisper_runner] Usando carpeta de modelos personalizada: {model_dir}", file=sys.stderr, flush=True)
+        model = whisper.load_model(resolved_model, device=device, download_root=model_dir)
+    else:
+        model = whisper.load_model(resolved_model, device=device)
 
     # ── Candado de Idioma (v0.2.2) ────────────────────────────────────────────
     # Si el usuario eligió un idioma específico pero el audio está en otro idioma,
@@ -1209,7 +1214,57 @@ def transcribir(file_path: str, model_name: str, language: str,
     if language_usado and language_usado.lower() not in ("auto", ""):
         kwargs["language"] = language_usado
 
+    # Precargar audio para obtener duración precisa y habilitar telemetría con ETA
+    audio_np = None
+    audio_duration = 0.0
+    try:
+        audio_np = whisper.load_audio(file_path)
+        audio_np = normalizar_audio_amplitud(audio_np)
+        audio_duration = float(len(audio_np) / 16000.0)
+        print(f"[whisper_runner] AUDIO_DURATION: {audio_duration:.2f}s", file=sys.stderr, flush=True)
+    except Exception as e_dur:
+        print(f"[whisper_runner] Aviso medición duración audio: {e_dur}", file=sys.stderr, flush=True)
+
     print(f"[whisper_runner] ETAPA 2/{total_etapas}: Transcribiendo audio: {os.path.basename(file_path)}", file=sys.stderr, flush=True)
+
+    # Telemetría de decodificación con cálculo en tiempo real de ETA
+    import time
+    try:
+        import tqdm
+        orig_tqdm = tqdm.tqdm
+        start_transcribe_time = time.time()
+        
+        class WhisperProgressTracker(orig_tqdm):
+            def update(self, n=1):
+                super().update(n)
+                if self.total and self.total > 0:
+                    frac = min(1.0, max(0.0, self.n / float(self.total)))
+                    pct_inicio = 15.0
+                    pct_fin = 70.0 if diarize else 90.0
+                    pct_global = pct_inicio + frac * (pct_fin - pct_inicio)
+                    
+                    elapsed = max(0.1, time.time() - start_transcribe_time)
+                    if frac > 0.02:
+                        total_time_est = elapsed / frac
+                        eta_sec = max(0, total_time_est - elapsed)
+                    else:
+                        eta_sec = 0
+                    
+                    speed = (frac * audio_duration) / elapsed if (audio_duration > 0 and elapsed > 0) else 1.0
+                    
+                    prog_data = {
+                        "pct": round(pct_global, 1),
+                        "eta_sec": round(eta_sec),
+                        "speed": round(speed, 1),
+                        "stage": 2,
+                        "msg": f"Decodificando audio con Whisper ({pct_global:.0f}%)..."
+                    }
+                    print(f"[whisper_progress] {json.dumps(prog_data)}", file=sys.stderr, flush=True)
+
+        tqdm.tqdm = WhisperProgressTracker
+    except Exception:
+        orig_tqdm = None
+
     real_stdout = sys.stdout
     try:
         # Redirigir stdout a stderr durante la inferencia para que ningún mensaje
@@ -1218,20 +1273,26 @@ def transcribir(file_path: str, model_name: str, language: str,
         result = model.transcribe(file_path, **kwargs)
     finally:
         sys.stdout = real_stdout
+        if orig_tqdm:
+            try:
+                import tqdm
+                tqdm.tqdm = orig_tqdm
+            except Exception:
+                pass
 
     segments_raw = result.get("segments", [])
     detected_language = result.get("language", language_usado)
-    duration = segments_raw[-1]["end"] if segments_raw else 0.0
+    duration = segments_raw[-1]["end"] if segments_raw else audio_duration
 
     print(f"[whisper_runner] Segmentos: {len(segments_raw)}, idioma: {detected_language}", file=sys.stderr, flush=True)
 
-    # Cargar audio en numpy para diarización y ajuste de tiempos
-    audio_np = None
-    try:
-        audio_np = whisper.load_audio(file_path)
-        audio_np = normalizar_audio_amplitud(audio_np)
-    except Exception as e:
-        print(f"[whisper_runner] Aviso carga audio: {e}", file=sys.stderr, flush=True)
+    # Cargar audio en numpy si aún no se había cargado
+    if audio_np is None:
+        try:
+            audio_np = whisper.load_audio(file_path)
+            audio_np = normalizar_audio_amplitud(audio_np)
+        except Exception as e:
+            print(f"[whisper_runner] Aviso carga audio: {e}", file=sys.stderr, flush=True)
 
     # Liberar el modelo de la VRAM/RAM antes de etapas posteriores
     try:
@@ -1376,6 +1437,8 @@ def main():
                         help="true/false para activar o desactivar la diarización de interlocutores")
     parser.add_argument("--device", default="auto",
                         help="Dispositivo de inferencia: auto, cuda, cpu (por defecto: auto)")
+    parser.add_argument("--model-dir", default=None,
+                        help="Directorio personalizado donde se alojan los modelos Whisper (download_root)")
     args = parser.parse_args()
 
     if not os.path.isfile(args.file):
@@ -1391,7 +1454,8 @@ def main():
             args.language,
             args.num_speakers,
             args.device,
-            diarize=diarize_enabled
+            diarize=diarize_enabled,
+            model_dir=args.model_dir
         )
         print(json.dumps(resultado, ensure_ascii=False))
     except Exception as e:

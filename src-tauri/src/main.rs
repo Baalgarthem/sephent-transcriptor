@@ -631,6 +631,404 @@ fn resolver_cache_dir_whisper() -> PathBuf {
     p
 }
 
+#[cfg(target_os = "windows")]
+fn obtener_espacio_libre_mb(path: &Path) -> Option<u64> {
+    use std::os::windows::ffi::OsStrExt;
+    let mut path_wide: Vec<u16> = path.as_os_str().encode_wide().collect();
+    path_wide.push(0);
+
+    let mut free_bytes_available: u64 = 0;
+    let mut total_number_of_bytes: u64 = 0;
+    let mut total_number_of_free_bytes: u64 = 0;
+
+    extern "system" {
+        fn GetDiskFreeSpaceExW(
+            lpDirectoryName: *const u16,
+            lpFreeBytesAvailableToCaller: *mut u64,
+            lpTotalNumberOfBytes: *mut u64,
+            lpTotalNumberOfFreeBytes: *mut u64,
+        ) -> i32;
+    }
+
+    unsafe {
+        let res = GetDiskFreeSpaceExW(
+            path_wide.as_ptr(),
+            &mut free_bytes_available,
+            &mut total_number_of_bytes,
+            &mut total_number_of_free_bytes,
+        );
+        if res != 0 {
+            Some(free_bytes_available / (1024 * 1024))
+        } else {
+            None
+        }
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn obtener_espacio_libre_mb(_path: &Path) -> Option<u64> {
+    None
+}
+
+fn es_directorio_sistema_protegido(path: &Path) -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        let path_str = path.to_string_lossy().to_lowercase().replace('/', "\\");
+        let dirs_protegidos = [
+            "c:\\windows",
+            "c:\\windows\\system32",
+            "c:\\windows\\syswow64",
+            "c:\\program files",
+            "c:\\program files (x86)",
+            "c:\\programdata\\microsoft",
+        ];
+        for d in dirs_protegidos {
+            if path_str == d || path_str.starts_with(&format!("{}\\", d)) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+#[derive(Debug, serde::Serialize)]
+struct InfoValidacionPermisos {
+    #[serde(rename = "esValida")]
+    es_valida: bool,
+    #[serde(rename = "puedeEscribir")]
+    puede_escribir: bool,
+    #[serde(rename = "rutaNormalizada")]
+    ruta_normalizada: String,
+    #[serde(rename = "espacioLibreMB")]
+    espacio_libre_mb: Option<u64>,
+    #[serde(rename = "esMismaRutaActual")]
+    es_misma_ruta_actual: bool,
+    #[serde(rename = "esDirectorioSistema")]
+    es_directorio_sistema: bool,
+    error: Option<String>,
+    #[serde(rename = "mensajePedagogico")]
+    mensaje_pedagogico: String,
+}
+
+#[tauri::command]
+async fn verificar_permisos_directorio(ruta: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let ruta_trim = ruta.trim();
+        if ruta_trim.is_empty() {
+            let res = InfoValidacionPermisos {
+                es_valida: false,
+                puede_escribir: false,
+                ruta_normalizada: String::new(),
+                espacio_libre_mb: None,
+                es_misma_ruta_actual: false,
+                es_directorio_sistema: false,
+                error: Some("Ruta vacía".to_string()),
+                mensaje_pedagogico: "Debes especificar una ruta de carpeta válida.".to_string(),
+            };
+            return serde_json::to_string(&res).map_err(|e| e.to_string());
+        }
+
+        // Comprobación de caracteres ilegales en Windows
+        let caracteres_invalidos = ['<', '>', '"', '|', '?', '*'];
+        if ruta_trim.chars().any(|c| caracteres_invalidos.contains(&c)) {
+            let res = InfoValidacionPermisos {
+                es_valida: false,
+                puede_escribir: false,
+                ruta_normalizada: ruta_trim.to_string(),
+                espacio_libre_mb: None,
+                es_misma_ruta_actual: false,
+                es_directorio_sistema: false,
+                error: Some("Caracteres inválidos en ruta".to_string()),
+                mensaje_pedagogico: "La ruta contiene caracteres no permitidos en el sistema operativo (<, >, \", |, ?, *).".to_string(),
+            };
+            return serde_json::to_string(&res).map_err(|e| e.to_string());
+        }
+
+        let p = PathBuf::from(ruta_trim);
+        let ruta_norm = p.to_string_lossy().to_string();
+
+        // Validar si es directorio protegido del sistema
+        if es_directorio_sistema_protegido(&p) {
+            let res = InfoValidacionPermisos {
+                es_valida: false,
+                puede_escribir: false,
+                ruta_normalizada: ruta_norm,
+                espacio_libre_mb: obtener_espacio_libre_mb(&p),
+                es_misma_ruta_actual: false,
+                es_directorio_sistema: true,
+                error: Some("Directorio de sistema protegido".to_string()),
+                mensaje_pedagogico: "Por seguridad e integridad del sistema, no está permitido seleccionar carpetas del sistema operativo (Windows, Program Files, etc.). Elige una carpeta de usuario o en una unidad secundaria.".to_string(),
+            };
+            return serde_json::to_string(&res).map_err(|e| e.to_string());
+        }
+
+        // Si no existe, intentar crear el directorio
+        if !p.exists() {
+            if let Err(e) = std::fs::create_dir_all(&p) {
+                let res = InfoValidacionPermisos {
+                    es_valida: false,
+                    puede_escribir: false,
+                    ruta_normalizada: ruta_norm,
+                    espacio_libre_mb: None,
+                    es_misma_ruta_actual: false,
+                    es_directorio_sistema: false,
+                    error: Some(format!("No se pudo crear la carpeta: {}", e)),
+                    mensaje_pedagogico: format!("No se pudo crear la carpeta en la ruta indicada. Detalle del sistema: {}", e),
+                };
+                return serde_json::to_string(&res).map_err(|e| e.to_string());
+            }
+        } else if !p.is_dir() {
+            let res = InfoValidacionPermisos {
+                es_valida: false,
+                puede_escribir: false,
+                ruta_normalizada: ruta_norm,
+                espacio_libre_mb: None,
+                es_misma_ruta_actual: false,
+                es_directorio_sistema: false,
+                error: Some("La ruta apunta a un archivo, no a una carpeta".to_string()),
+                mensaje_pedagogico: "La ruta seleccionada corresponde a un archivo existente. Debe ser una carpeta.".to_string(),
+            };
+            return serde_json::to_string(&res).map_err(|e| e.to_string());
+        }
+
+        // Prueba de escritura con archivo de prueba efímero
+        let probe_name = format!(".sephent_probe_{}.tmp", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis());
+        let probe_path = p.join(probe_name);
+
+        match std::fs::write(&probe_path, b"sephent_permission_ok") {
+            Ok(_) => {
+                let _ = std::fs::remove_file(&probe_path);
+                let espacio_mb = obtener_espacio_libre_mb(&p);
+                let res = InfoValidacionPermisos {
+                    es_valida: true,
+                    puede_escribir: true,
+                    ruta_normalizada: ruta_norm,
+                    espacio_libre_mb: espacio_mb,
+                    es_misma_ruta_actual: false,
+                    es_directorio_sistema: false,
+                    error: None,
+                    mensaje_pedagogico: "Carpeta verificada con permisos de escritura y lectura correctos.".to_string(),
+                };
+                serde_json::to_string(&res).map_err(|e| e.to_string())
+            }
+            Err(e) => {
+                let res = InfoValidacionPermisos {
+                    es_valida: false,
+                    puede_escribir: false,
+                    ruta_normalizada: ruta_norm,
+                    espacio_libre_mb: obtener_espacio_libre_mb(&p),
+                    es_misma_ruta_actual: false,
+                    es_directorio_sistema: false,
+                    error: Some(format!("Permiso de escritura denegado: {}", e)),
+                    mensaje_pedagogico: format!("No se tienen permisos de escritura en la carpeta seleccionada (permiso denegado o disco protegido). Detalle: {}", e),
+                };
+                serde_json::to_string(&res).map_err(|e| e.to_string())
+            }
+        }
+    })
+    .await
+    .map_err(|e| format!("Error en tarea de verificación de permisos: {}", e))?
+}
+
+#[tauri::command]
+async fn seleccionar_carpeta_dialogo() -> Result<Option<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let dialog = tauri::api::dialog::blocking::FileDialogBuilder::new()
+            .set_title("Seleccionar carpeta para modelos OpenAI Whisper");
+        let folder = dialog.pick_folder();
+        Ok(folder.map(|p| p.to_string_lossy().to_string()))
+    })
+    .await
+    .map_err(|e| format!("Error al abrir diálogo de selección de carpeta: {}", e))?
+}
+
+#[derive(Debug, serde::Serialize)]
+struct ResumenRelocalizacion {
+    exito: bool,
+    #[serde(rename = "archivosMovidos")]
+    archivos_movidos: Vec<String>,
+    #[serde(rename = "archivosOmitidos")]
+    archivos_omitidos: Vec<String>,
+    #[serde(rename = "bytesTransferidos")]
+    bytes_transferidos: u64,
+    #[serde(rename = "rutaAnterior")]
+    ruta_anterior: String,
+    #[serde(rename = "rutaNueva")]
+    ruta_nueva: String,
+    error: Option<String>,
+    mensaje: String,
+}
+
+#[tauri::command]
+async fn mover_modelos_whisper(
+    ruta_origen: Option<String>,
+    ruta_destino: String,
+    window: Window,
+) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let origen = if let Some(ref ro) = ruta_origen {
+            let p = PathBuf::from(ro);
+            if p.exists() { p } else { resolver_cache_dir_whisper() }
+        } else {
+            resolver_cache_dir_whisper()
+        };
+
+        let destino = PathBuf::from(&ruta_destino);
+        let ruta_anterior_str = origen.to_string_lossy().to_string();
+        let ruta_nueva_str = destino.to_string_lossy().to_string();
+
+        let norm_origen = ruta_anterior_str.to_lowercase().replace('/', "\\");
+        let norm_destino = ruta_nueva_str.to_lowercase().replace('/', "\\");
+
+        if norm_origen == norm_destino {
+            let res = ResumenRelocalizacion {
+                exito: true,
+                archivos_movidos: Vec::new(),
+                archivos_omitidos: Vec::new(),
+                bytes_transferidos: 0,
+                ruta_anterior: ruta_anterior_str,
+                ruta_nueva: ruta_nueva_str,
+                error: None,
+                mensaje: "La carpeta de origen y destino son idénticas. No se requiere transferencia.".to_string(),
+            };
+            return serde_json::to_string(&res).map_err(|e| e.to_string());
+        }
+
+        // Crear carpeta destino si no existe
+        if let Err(e) = std::fs::create_dir_all(&destino) {
+            return Err(format!("No se pudo crear la carpeta destino: {}", e));
+        }
+
+        // Buscar modelos en origen (.pt, .bin)
+        let mut candidatos: Vec<(PathBuf, String, u64)> = Vec::new();
+        if origen.is_dir() {
+            if let Ok(entries) = std::fs::read_dir(&origen) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.is_file() {
+                        let fname = path.file_name().unwrap_or_default().to_string_lossy().to_string();
+                        let fname_lower = fname.to_lowercase();
+                        if fname_lower.ends_with(".pt") || fname_lower.ends_with(".bin") {
+                            let len = path.metadata().map(|m| m.len()).unwrap_or(0);
+                            if len > 500_000 {
+                                candidatos.push((path, fname, len));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        let total_archivos = candidatos.len();
+        let total_bytes: u64 = candidatos.iter().map(|(_, _, s)| *s).sum();
+
+        // Validar espacio libre en destino
+        if let Some(espacio_libre_mb) = obtener_espacio_libre_mb(&destino) {
+            let espacio_libre_bytes = espacio_libre_mb * 1024 * 1024;
+            if total_bytes > espacio_libre_bytes {
+                return Err(format!(
+                    "Espacio insuficiente en disco destino: se requieren {} MB pero solo hay {} MB disponibles.",
+                    total_bytes / (1024 * 1024),
+                    espacio_libre_mb
+                ));
+            }
+        }
+
+        let mut archivos_movidos = Vec::new();
+        let mut archivos_omitidos = Vec::new();
+        let mut bytes_transferidos: u64 = 0;
+
+        for (idx, (src_path, fname, size)) in candidatos.into_iter().enumerate() {
+            let target_path = destino.join(&fname);
+
+            // Si el archivo ya existe en destino con el mismo tamaño, no duplicamos
+            if target_path.is_file() {
+                if let Ok(meta_dest) = target_path.metadata() {
+                    if meta_dest.len() == size {
+                        archivos_omitidos.push(fname.clone());
+                        let _ = std::fs::remove_file(&src_path);
+                        continue;
+                    }
+                }
+            }
+
+            let _ = window.emit("relocalizacion-progreso", serde_json::json!({
+                "archivoActual": fname,
+                "indice": idx + 1,
+                "totalArchivos": total_archivos,
+                "porcentaje": if total_bytes > 0 { (bytes_transferidos as f64 / total_bytes as f64 * 100.0).round() as u32 } else { 0 },
+                "bytesTransferidos": bytes_transferidos,
+                "totalBytes": total_bytes,
+                "mensaje": format!("Transfiriendo modelo {} ({} de {})...", fname, idx + 1, total_archivos)
+            }));
+
+            // Copia segura a archivo temporal
+            let temp_target = destino.join(format!("{}.transfer_tmp", fname));
+            if let Err(e) = std::fs::copy(&src_path, &temp_target) {
+                let _ = std::fs::remove_file(&temp_target);
+                return Err(format!("Fallo al copiar modelo {}: {}", fname, e));
+            }
+
+            // Verificación de integridad por longitud de bytes
+            let copied_size = temp_target.metadata().map(|m| m.len()).unwrap_or(0);
+            if copied_size != size {
+                let _ = std::fs::remove_file(&temp_target);
+                return Err(format!("Error de integridad al transferir {}: el archivo copiado está incompleto ({} vs {} bytes)", fname, copied_size, size));
+            }
+
+            // Renombrado atómico en destino
+            if target_path.exists() {
+                let _ = std::fs::remove_file(&target_path);
+            }
+            if let Err(e) = std::fs::rename(&temp_target, &target_path) {
+                let _ = std::fs::remove_file(&temp_target);
+                return Err(format!("No se pudo consolidar el modelo {} en destino: {}", fname, e));
+            }
+
+            // Eliminar origen SOLO tras verificación confirmada
+            let _ = std::fs::remove_file(&src_path);
+
+            bytes_transferidos += size;
+            archivos_movidos.push(fname);
+        }
+
+        let _ = window.emit("relocalizacion-progreso", serde_json::json!({
+            "archivoActual": "",
+            "indice": total_archivos,
+            "totalArchivos": total_archivos,
+            "porcentaje": 100,
+            "bytesTransferidos": bytes_transferidos,
+            "totalBytes": total_bytes,
+            "mensaje": "Relocalización de modelos completada con éxito."
+        }));
+
+        let mensaje = if archivos_movidos.is_empty() && archivos_omitidos.is_empty() {
+            "No se encontraron modelos previos en la ruta origen; la nueva carpeta se configuró como la ubicación por defecto.".to_string()
+        } else {
+            format!(
+                "Se trasladaron exitosamente {} modelo(s) ({:.1} MB). La nueva carpeta es ahora la ubicación por defecto.",
+                archivos_movidos.len(),
+                bytes_transferidos as f64 / (1024.0 * 1024.0)
+            )
+        };
+
+        let res = ResumenRelocalizacion {
+            exito: true,
+            archivos_movidos,
+            archivos_omitidos,
+            bytes_transferidos,
+            ruta_anterior: ruta_anterior_str,
+            ruta_nueva: ruta_nueva_str,
+            error: None,
+            mensaje,
+        };
+
+        serde_json::to_string(&res).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| format!("Error en tarea de relocalización: {}", e))?
+}
+
 #[derive(serde::Serialize)]
 struct ModeloAuditItem {
     id: &'static str,
@@ -838,7 +1236,11 @@ print(json.dumps(res))
 }
 
 #[tauri::command]
-async fn descargar_modelo(window: Window, modelo_id: String) -> Result<String, String> {
+async fn descargar_modelo(
+    window: Window,
+    modelo_id: String,
+    ruta_personalizada: Option<String>,
+) -> Result<String, String> {
     let app = window.app_handle();
     let script_path = resolver_ruta_script(&app, "model_downloader.py");
 
@@ -846,8 +1248,14 @@ async fn descargar_modelo(window: Window, modelo_id: String) -> Result<String, S
         let mut cmd = obtener_comando_python();
         if script_path.exists() {
             cmd.arg(&script_path).arg("--download").arg(&modelo_id);
+            if let Some(ref rp) = ruta_personalizada {
+                let rp_clean = rp.trim();
+                if !rp_clean.is_empty() {
+                    cmd.arg("--cache-dir").arg(rp_clean);
+                }
+            }
         } else {
-            // Script inline de descarga segura si el archivo externo no existiese
+            let cdir_escaped = ruta_personalizada.as_deref().unwrap_or("").trim().replace('\\', "/");
             let inline_dl = format!(
                 r#"import os, sys, time, json, urllib.request, hashlib
 cat = {{"tiny": ("tiny.pt", "https://openaipublic.azureedge.net/main/whisper/models/65147644a518d12f04e32d6f3b26facc3f8dd46e5390956a9424a650c0ce22b9/tiny.pt", "65147644a518d12f04e32d6f3b26facc3f8dd46e5390956a9424a650c0ce22b9", 75), "base": ("base.pt", "https://openaipublic.azureedge.net/main/whisper/models/ed3a0b6b1c0edf879ad9b11b1af5a0e6ab5db9205f891f668f8b0e6c6326e34e/base.pt", "ed3a0b6b1c0edf879ad9b11b1af5a0e6ab5db9205f891f668f8b0e6c6326e34e", 142), "small": ("small.pt", "https://openaipublic.azureedge.net/main/whisper/models/9ecf779972d90ba49c06d968637d720dd632c55bbf19d441fb42bf17a411e794/small.pt", "9ecf779972d90ba49c06d968637d720dd632c55bbf19d441fb42bf17a411e794", 466), "medium": ("medium.pt", "https://openaipublic.azureedge.net/main/whisper/models/345ae4da62f9b3d59415adc60127b97c714f32e89e936602e85993674d08dcb1/medium.pt", "345ae4da62f9b3d59415adc60127b97c714f32e89e936602e85993674d08dcb1", 1420), "large": ("large-v3.pt", "https://openaipublic.azureedge.net/main/whisper/models/e5b1a55b89c1367dacf97e3e19bfd829a01529dbfdeefa8caeb59b3f1b81dadb/large-v3.pt", "e5b1a55b89c1367dacf97e3e19bfd829a01529dbfdeefa8caeb59b3f1b81dadb", 2870), "turbo": ("large-v3-turbo.pt", "https://openaipublic.azureedge.net/main/whisper/models/aff26ae408abcba5fbf8813c21e62b0941638c5f6eebfb145be0c9839262a19a/large-v3-turbo.pt", "aff26ae408abcba5fbf8813c21e62b0941638c5f6eebfb145be0c9839262a19a", 1540)}}
@@ -855,7 +1263,8 @@ mod = cat.get('{0}')
 if not mod:
     print(json.dumps({{"type": "error", "mensaje": "Modelo no encontrado"}})); sys.exit(1)
 fn, url, exp_sha, tmb = mod
-cdir = os.path.expanduser("~/.cache/whisper")
+custom_dir = r"{1}".strip()
+cdir = custom_dir if custom_dir else os.path.expanduser("~/.cache/whisper")
 os.makedirs(cdir, exist_ok=True)
 dest = os.path.join(cdir, fn)
 if os.path.isfile(dest):
@@ -884,7 +1293,8 @@ if os.path.exists(dest): os.remove(dest)
 os.rename(part, dest)
 print(json.dumps({{"type": "complete", "modeloId": "{0}", "nombreArchivo": fn, "rutaCompleta": dest.replace("\\", "/"), "tamanoBytes": dl, "tamanoMB": round(dl/(1024*1024),1), "sha256": calc_sha, "coincide": calc_sha.lower() == exp_sha.lower()}}), flush=True)
 "#,
-                modelo_id
+                modelo_id,
+                cdir_escaped
             );
             cmd.args(&["-c", &inline_dl]);
         }
@@ -1010,6 +1420,7 @@ async fn transcribir_audio_whisper(
     modelo: String,
     idioma: String,
     diarizar: Option<bool>,
+    ruta_modelos: Option<String>,
     window: Window,
 ) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
@@ -1077,6 +1488,13 @@ async fn transcribir_audio_whisper(
         // v0.2.0: permitir que Python detecte y use CUDA/GPU automáticamente
         cmd.arg("--device");
         cmd.arg("auto");
+        if let Some(ref rm) = ruta_modelos {
+            let rm_clean = rm.trim();
+            if !rm_clean.is_empty() {
+                cmd.arg("--model-dir");
+                cmd.arg(rm_clean);
+            }
+        }
 
         cmd.stdout(Stdio::piped());
         cmd.stderr(Stdio::piped());
@@ -1106,7 +1524,30 @@ async fn transcribir_audio_whisper(
                 if let Ok(l) = linea {
                     let trimmed = l.trim();
                     if !trimmed.is_empty() {
+                        if trimmed.starts_with("[whisper_progress]") {
+                            let json_part = trimmed.trim_start_matches("[whisper_progress]").trim();
+                            if let Ok(v) = serde_json::from_str::<serde_json::Value>(json_part) {
+                                let pct = v.get("pct").and_then(|x| x.as_f64()).unwrap_or(45.0);
+                                let eta_sec = v.get("eta_sec").and_then(|x| x.as_f64()).map(|s| s as u64);
+                                let speed = v.get("speed").and_then(|x| x.as_f64()).unwrap_or(1.0);
+                                let stage = v.get("stage").and_then(|x| x.as_u64()).unwrap_or(2) as usize;
+                                let msg = v.get("msg").and_then(|x| x.as_str()).unwrap_or("Decodificando audio con Whisper...").to_string();
+
+                                let _ = window_clone.emit("transcripcion-progreso", serde_json::json!({
+                                    "porcentaje": pct.round() as u32,
+                                    "mensaje": msg,
+                                    "tiempoEstimadoSegundos": eta_sec,
+                                    "velocidadFactor": speed,
+                                    "etapaActual": stage,
+                                    "totalEtapas": total_etapas,
+                                    "detalle": trimmed
+                                }));
+                                continue;
+                            }
+                        }
+
                         let mut pct = 45;
+                        let mut etapa_num = 2;
                         let mut msg = if diarizar_activo {
                             format!("Etapa 2 de 4: Transcribiendo audio con Whisper ({})...", modelo_clone)
                         } else {
@@ -1114,7 +1555,8 @@ async fn transcribir_audio_whisper(
                         };
 
                         if trimmed.contains("ETAPA 1") || trimmed.contains("Cargando modelo") {
-                            pct = 20;
+                            pct = 15;
+                            etapa_num = 1;
                             let disp = if trimmed.contains("GPU NVIDIA") {
                                 if let Some(start) = trimmed.find("GPU NVIDIA") {
                                     let sub = &trimmed[start..];
@@ -1128,18 +1570,24 @@ async fn transcribir_audio_whisper(
                             };
                             msg = format!("Etapa 1 de {}: Cargando modelo {} en {}...", total_etapas, modelo_clone, disp);
                         } else if trimmed.contains("ETAPA 2") || trimmed.contains("Transcribiendo") {
-                            pct = if diarizar_activo { 50 } else { 60 };
+                            pct = if diarizar_activo { 45 } else { 55 };
+                            etapa_num = 2;
                             msg = format!("Etapa 2 de {}: Extrayendo espectrograma y decodificando audio con Whisper...", total_etapas);
                         } else if diarizar_activo && (trimmed.contains("ETAPA 3") || trimmed.contains("Diarizando") || trimmed.contains("Segmentos:")) {
                             pct = 75;
+                            etapa_num = 3;
                             msg = "Etapa 3 de 4: Diarizando voces y discriminando interlocutores...".to_string();
                         } else if trimmed.contains("ETAPA 4") || trimmed.contains("ETAPA 3/3") || trimmed.contains("Sincronizando") || trimmed.contains("Estructurando") {
-                            pct = 90;
+                            pct = 92;
+                            etapa_num = total_etapas;
                             msg = format!("Etapa {} de {}: Estructurando expediente y aplicando pulido ortográfico...", total_etapas, total_etapas);
                         }
+
                         let _ = window_clone.emit("transcripcion-progreso", serde_json::json!({
                             "porcentaje": pct,
                             "mensaje": msg,
+                            "etapaActual": etapa_num,
+                            "totalEtapas": total_etapas,
                             "detalle": trimmed
                         }));
                     }
@@ -1219,7 +1667,10 @@ fn main() {
             guardar_archivo_texto,
             guardar_archivo_temporal,
             transcribir_audio_whisper,
-            cancelar_transcripcion
+            cancelar_transcripcion,
+            verificar_permisos_directorio,
+            seleccionar_carpeta_dialogo,
+            mover_modelos_whisper
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

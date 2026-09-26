@@ -34,6 +34,7 @@ export interface ConfiguracionUsuario {
   outputSrt: boolean;
   outputVideo: boolean;
   modoDestino: ModoDestinoSalida;
+  rutaModelosPersonalizada?: string | null;
   rolesPersonalizados?: string[];
   mostrarRolEnNombre?: boolean;
 }
@@ -93,6 +94,9 @@ export class UserSettingsService {
       outputSrt: typeof configRecuperada.outputSrt === 'boolean' ? configRecuperada.outputSrt : this.configuracionPorDefecto.outputSrt,
       outputVideo: typeof configRecuperada.outputVideo === 'boolean' ? configRecuperada.outputVideo : this.configuracionPorDefecto.outputVideo,
       modoDestino: configRecuperada.modoDestino || modoDestinoPersistido || this.configuracionPorDefecto.modoDestino,
+      rutaModelosPersonalizada: configRecuperada.rutaModelosPersonalizada !== undefined
+        ? configRecuperada.rutaModelosPersonalizada
+        : (WhisperPathService.obtenerRutaOficialPorDefecto().esRutaPersonalizada ? WhisperPathService.obtenerRutaOficialPorDefecto().rutaPorDefectoOficial : null),
       rolesPersonalizados: rolesPersistidos,
       mostrarRolEnNombre: typeof configRecuperada.mostrarRolEnNombre === 'boolean' ? configRecuperada.mostrarRolEnNombre : this.configuracionPorDefecto.mostrarRolEnNombre,
     };
@@ -116,6 +120,9 @@ export class UserSettingsService {
     }
     if (parcial.modoDestino) {
       OutputPathService.establecerModo(parcial.modoDestino);
+    }
+    if (parcial.rutaModelosPersonalizada !== undefined) {
+      WhisperPathService.guardarRutaPersonalizada(parcial.rutaModelosPersonalizada || '');
     }
     if (parcial.rolesPersonalizados) {
       this.guardarRolesPersonalizadosPrivado(parcial.rolesPersonalizados);

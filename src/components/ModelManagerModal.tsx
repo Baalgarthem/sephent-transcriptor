@@ -7,6 +7,8 @@ import { WHISPER_MODELS } from '../config/whisperConfig';
 import { THEME_TOKENS } from '../config/themeTokens';
 import { invoke } from '@tauri-apps/api/tauri';
 import { listen } from '@tauri-apps/api/event';
+import { ModelStorageServiceFactory } from '../services/models/modelStorageService';
+import { ProgresoRelocalizacion, ResultadoRelocalizacion } from '../services/models/modelStorageTypes';
 
 const obtenerTauriInvoke = () => {
   if (typeof window !== 'undefined' && (window as any).__TAURI__?.invoke) {
@@ -93,6 +95,11 @@ const ModelManagerModalContent: React.FC<ModelManagerModalProps> = ({
 
   const [notificaciones, setNotificaciones] = useState<Array<{ tipo: 'info' | 'advertencia' | 'exito'; texto: string }>>([]);
 
+  // Estados para la relocalización segura de modelos (Estilo Arturo)
+  const [estaRelocalizando, setEstaRelocalizando] = useState<boolean>(false);
+  const [progresoRelocalizacion, setProgresoRelocalizacion] = useState<ProgresoRelocalizacion | null>(null);
+  const [mensajeRelocalizacion, setMensajeRelocalizacion] = useState<{ tipo: 'exito' | 'error' | 'info'; texto: string } | null>(null);
+
   // Estado para confirmación de eliminación
   const [modeloAEliminar, setModeloAEliminar] = useState<string | null>(null);
 
@@ -166,6 +173,130 @@ const ModelManagerModalContent: React.FC<ModelManagerModalProps> = ({
       setResumen(ModelManager.obtenerResumenModelos());
     } catch (err) {
       console.warn('Aviso al recargar estado:', err);
+    }
+  };
+
+  const handleSeleccionarYMoverCarpeta = async () => {
+    setMensajeRelocalizacion(null);
+    const servicio = ModelStorageServiceFactory.obtenerServicio();
+
+    // 1. Selector interactivo nativo
+    let carpetaSeleccionada: string | null = null;
+    try {
+      carpetaSeleccionada = await servicio.seleccionarCarpetaDialogo();
+    } catch (e: any) {
+      setMensajeRelocalizacion({
+        tipo: 'error',
+        texto: `No se pudo abrir el selector de carpetas: ${e?.message || e}`,
+      });
+      return;
+    }
+
+    if (!carpetaSeleccionada) {
+      return; // Selección cancelada
+    }
+
+    // 2. Validación preventiva exhaustiva (permisos de escritura, volumen y restricciones)
+    setMensajeRelocalizacion({
+      tipo: 'info',
+      texto: `Comprobando permisos y espacio en disco para: ${carpetaSeleccionada}...`,
+    });
+
+    const validacion = await servicio.validarPermisosCarpeta(carpetaSeleccionada);
+    if (!validacion.esValida) {
+      setMensajeRelocalizacion({
+        tipo: 'error',
+        texto: validacion.mensajePedagogico,
+      });
+      return;
+    }
+
+    // 3. Confirmación pedagógica con el usuario
+    const espacioInfo = validacion.espacioLibreMB ? ` (${Math.round((validacion.espacioLibreMB / 1024) * 10) / 10} GB libres)` : '';
+    const confirmacion = window.confirm(
+      `¿Deseas mover los modelos de OpenAI Whisper a la siguiente carpeta?\n\n` +
+      `📁 Destino: ${validacion.rutaNormalizada}${espacioInfo}\n\n` +
+      `Esta carpeta pasará a ser la ubicación predeterminada para cargar y descargar modelos. Todos tus modelos actuales serán transferidos con verificación de integridad.`
+    );
+
+    if (!confirmacion) {
+      setMensajeRelocalizacion(null);
+      return;
+    }
+
+    // 4. Ejecución de la relocalización atómica con progreso
+    setEstaRelocalizando(true);
+    setProgresoRelocalizacion({
+      archivoActual: '',
+      indice: 0,
+      totalArchivos: resumen?.totalDescargados || 0,
+      porcentaje: 0,
+      bytesTransferidos: 0,
+      totalBytes: 0,
+      mensaje: 'Iniciando transferencia segura de modelos...',
+    });
+
+    try {
+      const res: ResultadoRelocalizacion = await ModelManager.relocalizarModelosACarpeta(
+        validacion.rutaNormalizada,
+        (prog) => setProgresoRelocalizacion(prog)
+      );
+
+      if (res.exito) {
+        recargarEstado();
+        setMensajeRelocalizacion({
+          tipo: 'exito',
+          texto: `✓ ${res.mensaje}`,
+        });
+      } else {
+        setMensajeRelocalizacion({
+          tipo: 'error',
+          texto: `❌ ${res.mensaje || res.error || 'Fallo durante la relocalización'}`,
+        });
+      }
+    } catch (err: any) {
+      setMensajeRelocalizacion({
+        tipo: 'error',
+        texto: `❌ Error inesperado: ${err?.message || err}`,
+      });
+    } finally {
+      setEstaRelocalizando(false);
+      setProgresoRelocalizacion(null);
+    }
+  };
+
+  const handleRestablecerUbicacionOficial = async () => {
+    const confirmacion = window.confirm(
+      '¿Deseas mover los modelos de vuelta a la carpeta oficial por defecto de OpenAI Whisper?\n\n' +
+      'Los modelos descargados serán reintegrados a la ubicación estándar del sistema (%USERPROFILE%\\.cache\\whisper).'
+    );
+
+    if (!confirmacion) return;
+
+    setEstaRelocalizando(true);
+    setMensajeRelocalizacion(null);
+    try {
+      const res = await ModelManager.restablecerRutaOficial(true, (prog) => setProgresoRelocalizacion(prog));
+      recargarEstado();
+      if (res.exito) {
+        setMensajeRelocalizacion({
+          tipo: 'exito',
+          texto: `✓ ${res.mensaje}`,
+        });
+      } else {
+        setMensajeRelocalizacion({
+          tipo: 'error',
+          texto: `❌ ${res.mensaje || res.error}`,
+        });
+      }
+    } catch (err: any) {
+      setMensajeRelocalizacion({
+        tipo: 'error',
+        texto: `❌ Error: ${err?.message || err}`,
+      });
+    } finally {
+      setEstaRelocalizando(false);
+      setProgresoRelocalizacion(null);
     }
   };
 
@@ -961,40 +1092,46 @@ const ModelManagerModalContent: React.FC<ModelManagerModalProps> = ({
             </span>
           </div>
 
-          {/* Tarjeta de Ruta Oficial */}
+          {/* Tarjeta de Ubicación de Modelos (Oficial o Personalizada) */}
           <div
             style={{
-              backgroundColor: THEME_TOKENS.colors.surfaceBase,
-              border: `1px solid ${THEME_TOKENS.colors.borderSubtle}`,
+              backgroundColor: infoRuta?.esRutaPersonalizada ? THEME_TOKENS.colors.stateSuccessBg : THEME_TOKENS.colors.surfaceBase,
+              border: `1px solid ${infoRuta?.esRutaPersonalizada ? THEME_TOKENS.colors.stateSuccessBorder : THEME_TOKENS.colors.borderSubtle}`,
               borderRadius: THEME_TOKENS.radii.md,
-              padding: '1rem 1.15rem',
+              padding: '1.15rem 1.25rem',
               marginBottom: '1.25rem',
               boxShadow: THEME_TOKENS.shadows.sm,
+              transition: `all ${THEME_TOKENS.transitions.fast}`,
             }}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <span style={{ fontSize: '0.85rem', color: THEME_TOKENS.colors.textSecondary }}>📁</span>
-                <strong style={{ color: THEME_TOKENS.colors.textPrimary, fontSize: '0.85rem' }}>
-                  Ruta Canónica Oficial Detectada:
+                <span style={{ fontSize: '1rem', color: THEME_TOKENS.colors.textSecondary }}>
+                  {infoRuta?.esRutaPersonalizada ? '📍' : '📁'}
+                </span>
+                <strong style={{ color: THEME_TOKENS.colors.textPrimary, fontSize: '0.875rem' }}>
+                  {infoRuta?.esRutaPersonalizada ? 'Ubicación Personalizada por Defecto:' : 'Ubicación Oficial Canónica:'}
                 </strong>
               </div>
               <span
                 style={{
-                  backgroundColor: THEME_TOKENS.colors.bgSecondary,
-                  color: THEME_TOKENS.colors.textSecondary,
-                  border: `1px solid ${THEME_TOKENS.colors.borderStrong}`,
+                  backgroundColor: infoRuta?.esRutaPersonalizada ? THEME_TOKENS.colors.stateSuccess : THEME_TOKENS.colors.bgSecondary,
+                  color: infoRuta?.esRutaPersonalizada ? THEME_TOKENS.colors.textOnDark : THEME_TOKENS.colors.textSecondary,
+                  border: `1px solid ${infoRuta?.esRutaPersonalizada ? THEME_TOKENS.colors.stateSuccessBorder : THEME_TOKENS.colors.borderStrong}`,
                   fontSize: '0.6875rem',
                   fontWeight: 700,
                   letterSpacing: '0.05em',
-                  padding: '0.15rem 0.55rem',
+                  padding: '0.2rem 0.65rem',
                   borderRadius: THEME_TOKENS.radii.xs,
                   textTransform: 'uppercase',
                 }}
               >
-                {(infoRuta?.sistemaOperativoDetectado || 'SISTEMA').toUpperCase()} OFICIAL
+                {infoRuta?.esRutaPersonalizada
+                  ? '✓ CARPETA PERSONALIZADA (POR DEFECTO)'
+                  : `${(infoRuta?.sistemaOperativoDetectado || 'SISTEMA').toUpperCase()} OFICIAL`}
               </span>
             </div>
+
             <p
               style={{
                 fontFamily: THEME_TOKENS.fonts.mono,
@@ -1003,16 +1140,160 @@ const ModelManagerModalContent: React.FC<ModelManagerModalProps> = ({
                 padding: '0.55rem 0.75rem',
                 borderRadius: THEME_TOKENS.radii.xs,
                 border: `1px solid ${THEME_TOKENS.colors.borderSubtle}`,
-                margin: '0.5rem 0 0.25rem 0',
+                margin: '0.6rem 0 0.5rem 0',
                 color: THEME_TOKENS.colors.textPrimary,
                 wordBreak: 'break-all',
               }}
             >
               {infoRuta?.rutaPorDefectoOficial || '%USERPROFILE%\\.cache\\whisper'}
             </p>
-            <span style={{ fontSize: '0.75rem', color: THEME_TOKENS.colors.textMuted }}>
-              * Ubicación por defecto de OpenAI Whisper en el sistema local.
-            </span>
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem', marginTop: '0.75rem' }}>
+              <span style={{ fontSize: '0.75rem', color: THEME_TOKENS.colors.textMuted }}>
+                {infoRuta?.esRutaPersonalizada
+                  ? 'Esta carpeta personalizada es ahora la ubicación por defecto para transcribir y descargar modelos.'
+                  : '* Ubicación estándar de OpenAI Whisper en el disco del sistema.'}
+              </span>
+
+              {/* Botones de acción para relocalizar */}
+              <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                <button
+                  type="button"
+                  onClick={handleSeleccionarYMoverCarpeta}
+                  disabled={estaRelocalizando || Boolean(descargandoModeloId)}
+                  style={{
+                    backgroundColor: THEME_TOKENS.colors.accentPrimary,
+                    color: THEME_TOKENS.colors.textOnDark,
+                    border: `1px solid ${THEME_TOKENS.colors.borderDark}`,
+                    borderRadius: THEME_TOKENS.radii.sm,
+                    padding: '0.45rem 0.95rem',
+                    fontSize: '0.8rem',
+                    fontWeight: 600,
+                    cursor: (estaRelocalizando || Boolean(descargandoModeloId)) ? 'not-allowed' : 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.4rem',
+                    transition: `all ${THEME_TOKENS.transitions.fast}`,
+                  }}
+                  title="Selecciona una carpeta (por ejemplo en un disco secundario D:\ o E:\) y traslada de forma segura los modelos existentes"
+                >
+                  <span>📂</span> {infoRuta?.esRutaPersonalizada ? 'Cambiar / Mover a otra carpeta' : 'Mover modelos a carpeta personalizada'}
+                </button>
+
+                {infoRuta?.esRutaPersonalizada && (
+                  <button
+                    type="button"
+                    onClick={handleRestablecerUbicacionOficial}
+                    disabled={estaRelocalizando || Boolean(descargandoModeloId)}
+                    style={{
+                      backgroundColor: 'transparent',
+                      color: THEME_TOKENS.colors.textSecondary,
+                      border: `1px solid ${THEME_TOKENS.colors.borderStrong}`,
+                      borderRadius: THEME_TOKENS.radii.sm,
+                      padding: '0.45rem 0.75rem',
+                      fontSize: '0.8rem',
+                      fontWeight: 500,
+                      cursor: (estaRelocalizando || Boolean(descargandoModeloId)) ? 'not-allowed' : 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.35rem',
+                    }}
+                    title="Restablece la carpeta oficial estándar (~/.cache/whisper) y devuelve los modelos descargados allí"
+                  >
+                    <span>🔄</span> Restablecer oficial
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Banner de progreso de relocalización */}
+            {estaRelocalizando && progresoRelocalizacion && (
+              <div
+                style={{
+                  marginTop: '0.85rem',
+                  padding: '0.75rem 0.95rem',
+                  backgroundColor: THEME_TOKENS.colors.bgCanvas,
+                  borderRadius: THEME_TOKENS.radii.sm,
+                  border: `1px solid ${THEME_TOKENS.colors.borderStrong}`,
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.775rem', marginBottom: '0.35rem' }}>
+                  <span style={{ fontWeight: 600, color: THEME_TOKENS.colors.textPrimary }}>
+                    {progresoRelocalizacion.mensaje}
+                  </span>
+                  <span style={{ fontFamily: THEME_TOKENS.fonts.mono, color: THEME_TOKENS.colors.textSecondary }}>
+                    {progresoRelocalizacion.porcentaje}%
+                  </span>
+                </div>
+                <div
+                  style={{
+                    height: '6px',
+                    backgroundColor: THEME_TOKENS.colors.borderSubtle,
+                    borderRadius: '3px',
+                    overflow: 'hidden',
+                  }}
+                >
+                  <div
+                    style={{
+                      width: `${progresoRelocalizacion.porcentaje}%`,
+                      height: '100%',
+                      backgroundColor: THEME_TOKENS.colors.accentPrimary,
+                      transition: 'width 0.2s ease',
+                    }}
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Mensaje de feedback de relocalización */}
+            {mensajeRelocalizacion && (
+              <div
+                style={{
+                  marginTop: '0.75rem',
+                  padding: '0.55rem 0.85rem',
+                  borderRadius: THEME_TOKENS.radii.xs,
+                  fontSize: '0.8rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  backgroundColor:
+                    mensajeRelocalizacion.tipo === 'exito'
+                      ? THEME_TOKENS.colors.stateSuccessBg
+                      : mensajeRelocalizacion.tipo === 'error'
+                      ? '#FEF2F2'
+                      : THEME_TOKENS.colors.bgSecondary,
+                  border: `1px solid ${
+                    mensajeRelocalizacion.tipo === 'exito'
+                      ? THEME_TOKENS.colors.stateSuccessBorder
+                      : mensajeRelocalizacion.tipo === 'error'
+                      ? '#FCA5A5'
+                      : THEME_TOKENS.colors.borderStrong
+                  }`,
+                  color:
+                    mensajeRelocalizacion.tipo === 'exito'
+                      ? THEME_TOKENS.colors.stateSuccess
+                      : mensajeRelocalizacion.tipo === 'error'
+                      ? '#B91C1C'
+                      : THEME_TOKENS.colors.textPrimary,
+                }}
+              >
+                <span>{mensajeRelocalizacion.texto}</span>
+                <button
+                  type="button"
+                  onClick={() => setMensajeRelocalizacion(null)}
+                  style={{
+                    background: 'transparent',
+                    border: 'none',
+                    cursor: 'pointer',
+                    color: 'inherit',
+                    fontSize: '0.85rem',
+                    marginLeft: '0.5rem',
+                  }}
+                >
+                  ✕
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Sección de Copia de Seguridad */}

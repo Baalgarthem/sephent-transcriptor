@@ -24,7 +24,7 @@ export interface OpcionesProcesamiento {
   model: string;
   language: string;
   diarizar?: boolean;
-  onProgreso?: (porcentaje: number, mensaje: string) => void;
+  onProgreso?: (porcentaje: number, mensaje: string, extra?: any) => void;
 }
 
 export interface ResultadoProcesamientoAudio {

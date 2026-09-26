@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, ChangeEvent } from 'react';
-import ProgressBar from './ProgressBar';
+import { TranscriptionProgressBar } from './TranscriptionProgressBar';
 import DonateButton from './DonateButton';
 import { ModelManagerModal } from './ModelManagerModal';
 import { ModelNotDownloadedModal } from './ModelNotDownloadedModal';
@@ -19,11 +19,21 @@ import { AudioTranscriptionEngine } from '../services/transcription/audioTranscr
 import { WhisperBridgeService } from '../services/transcription/whisperBridgeService';
 import { InfoHelpButton, HoverTooltip } from './common/Tooltip';
 import { HelpModal } from './HelpModal';
+import { useService } from '../core/di/DIContext';
+import { DI_TOKENS } from '../core/di/tokens';
+import { ITranscriptionEngine, TelemetriaTranscripcion } from '../core/contracts/ITranscriptionEngine';
+import { IPericialService } from '../core/contracts/IPericialService';
+import { ITelemetryService } from '../core/contracts/ITelemetryService';
 
 type ModelKey = keyof typeof WHISPER_MODELS;
 type LanguageOption = 'auto' | 'en' | 'es' | 'fr' | 'de' | 'it' | 'pt' | 'zh';
 
 export default function TranscriptionPanel(): React.ReactElement {
+  // Inyección de Dependencias (Estilo Arturo)
+  const transcriptionEngine = useService<ITranscriptionEngine>(DI_TOKENS.TRANSCRIPTION_ENGINE);
+  const pericialService = useService<IPericialService>(DI_TOKENS.PERICIAL_SERVICE);
+  const telemetryService = useService<ITelemetryService>(DI_TOKENS.TELEMETRY_SERVICE);
+
   // Cargar configuración guardada persistente del usuario (recuerda siempre todas las opciones)
   const configInicial = UserSettingsService.obtenerConfiguracion();
 
@@ -46,6 +56,24 @@ export default function TranscriptionPanel(): React.ReactElement {
   const [isRunning, setIsRunning] = useState(false);
   const [isCanceling, setIsCanceling] = useState(false);
   const cancelacionSolicitada = useRef(false);
+
+  // Telemetría con % exacto y tiempo estimado de completado (ETA)
+  const [telemetriaActual, setTelemetriaActual] = useState<{
+    porcentaje: number;
+    etapaActual: number;
+    totalEtapas: number;
+    mensaje: string;
+    tiempoEstimadoSegundos: number;
+    velocidadFactor: number;
+    nombreArchivo?: string;
+  }>({
+    porcentaje: 0,
+    etapaActual: 1,
+    totalEtapas: configInicial.diarizarHablantes ?? true ? 4 : 3,
+    mensaje: '',
+    tiempoEstimadoSegundos: 0,
+    velocidadFactor: 1.0,
+  });
 
   // Modo de destino de las transcripciones y base de datos persistente
   const [modoDestino, setModoDestino] = useState<ModoDestinoSalida>(configInicial.modoDestino);
@@ -137,58 +165,48 @@ export default function TranscriptionPanel(): React.ReactElement {
   };
 
   /**
-   * Genera y descarga el Informe Oficial de Transcripción.
-   * REGLA ESTRICTA: Bloqueado si la transcripción no ha sido marcada como revisada.
+   * Genera y descarga el Dictamen Pericial Oficial utilizando IPericialService inyectado.
+   * Aísla las reglas de validación forense y cadena de custodia en su subsistema.
    */
-  const handleDescargarInformeDesdePanel = (trxId: string, nombreArchivo: string) => {
+  const handleDescargarInformeDesdePanel = async (trxId: string, nombreArchivo: string) => {
     const itemBD = TranscriptionDatabase.buscarPorId(trxId);
-    if (!itemBD || !itemBD.revisado) {
-      alert(
-        `🔒 Bloqueo de seguridad: No se puede generar el informe de transcripción sin antes haber marcado la transcripción como revisada.\n\nPor favor, abre la sección "Revisar y Validar Hablantes" para identificar a las personas, generar el hash SHA-256 de integridad y marcarla como revisada.`
-      );
-      handleAbrirRevisor(nombreArchivo, trxId);
-      return;
-    }
+    if (!itemBD) return;
 
-    // Si está revisada, obtener o construir el expediente real para el informe
-    let dossier = ReviewerDatabase.buscarPorTranscripcionId(trxId);
-    if (!dossier) {
-      const segmentos = itemBD.rawSegments || [];
-      dossier = TranscriptionReviewerService.crearExpediente({
-        sourceFileName: nombreArchivo,
-        originalTranscriptionId: trxId,
-        rawSegments: segmentos,
-        nombresInicialesHablantes: itemBD.speakerNames,
-      });
-      dossier.revisado = itemBD.revisado;
-      dossier.fechaRevision = itemBD.fechaRevision;
-      dossier.hashSha256 = itemBD.hashSha256;
-      dossier.hashGeneradoEn = itemBD.hashGeneradoEn;
-    }
+    // Validación pericial mediante contrato de inyección de dependencias
+    const validacion = pericialService.validarRequisitosPericiales(
+      itemBD.rawSegments || [],
+      itemBD.speakerNames || {},
+      itemBD.hashSha256
+    );
 
-    // REQUISITO MÍNIMO PERICIAL: Todas las personas deben estar identificadas
-    const validacion = TranscriptionReviewerService.validarPersonasIdentificadas(dossier);
-    if (!validacion.todasIdentificadas) {
+    if (!validacion.puedeEmitirInforme) {
       alert(
-        `🔒 Requisito pericial mínimo no cumplido: Debe identificar a todas las personas en el audio o video asignándoles su nombre real antes de generar el informe pericial.\n\nPendientes de identificar: ${validacion.pendientes.join(', ')}.\n\nSe abrirá el panel para que puedas asignarles su nombre.`
+        `⚖️ Módulo Pericial: Requisito forense pendiente.\n\n${validacion.motivoBloqueo || 'Debe revisar y validar las identidades de los interlocutores antes de emitir un dictamen pericial oficial.'}\n\nSe abrirá el Módulo Pericial Forense.`
       );
       handleAbrirRevisor(nombreArchivo, trxId);
       return;
     }
 
     try {
-      const informe = TranscriptionReviewerService.generarInformeOficialTranscripcion(dossier, {
-        notasPericiales: itemBD.notes,
-      });
-      const blob = new Blob([informe], { type: 'text/plain;charset=utf-8' });
+      const informeEmitido = await pericialService.emitirInformePericial(
+        trxId,
+        itemBD.rawSegments || [],
+        itemBD.speakerNames || {},
+        {
+          perito: 'Perito Forense Oficial',
+          notasPericiales: itemBD.notes,
+          hashAudio: itemBD.hashSha256,
+        }
+      );
+      const blob = new Blob([informeEmitido.contenidoDocumento], { type: 'text/plain;charset=utf-8' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `${nombreArchivo.replace(/\.[^/.]+$/, '')}_informe_oficial_transcripcion.txt`;
+      a.download = `${nombreArchivo.replace(/\.[^/.]+$/, '')}_dictamen_pericial_oficial.txt`;
       a.click();
       URL.revokeObjectURL(url);
     } catch (err: any) {
-      alert(err?.message || 'Error al emitir el informe oficial.');
+      alert(err?.message || 'Error al emitir el dictamen pericial oficial.');
     }
   };
 
@@ -514,8 +532,12 @@ export default function TranscriptionPanel(): React.ReactElement {
     setIsCanceling(true);
     cancelacionSolicitada.current = true;
     setStatusMessage('⏹ Cancelando transcripción en segundo plano...');
+    setTelemetriaActual((prev) => ({
+      ...prev,
+      mensaje: '⏹ Cancelando transcripción...',
+    }));
     try {
-      await WhisperBridgeService.cancelar();
+      await transcriptionEngine.cancelar();
     } catch (err) {
       console.warn('Error al solicitar cancelación de Whisper:', err);
     }
@@ -523,7 +545,7 @@ export default function TranscriptionPanel(): React.ReactElement {
 
   /**
    * Proceso de Transcripción
-   * Aplica principios SOLID y patrones Strategy/Factory mediante TranscriptionService
+   * Aplica principios SOLID, Inyección de Dependencias y telemetría de ETA
    */
   const startTranscription = async () => {
     if (files.length === 0) {
@@ -553,8 +575,20 @@ export default function TranscriptionPanel(): React.ReactElement {
     setIsRunning(true);
     ModelManager.registrarUltimoModeloUtilizado(model);
     setProgress(0);
-    const totalEtapas = diarizarHablantes ? '4' : '3';
-    setStatusMessage(`Etapa 1 de ${totalEtapas}: Preparando modelo ${WHISPER_MODELS[model]?.nombreArchivo} desde la memoria local...`);
+    const totalEtapasNum = diarizarHablantes ? 4 : 3;
+    telemetryService.iniciarSesion(totalEtapasNum, 0);
+
+    const msgInicial = `Etapa 1 de ${totalEtapasNum}: Preparando modelo ${WHISPER_MODELS[model]?.nombreArchivo} desde la memoria local...`;
+    setStatusMessage(msgInicial);
+    setTelemetriaActual({
+      porcentaje: 5,
+      etapaActual: 1,
+      totalEtapas: totalEtapasNum,
+      mensaje: msgInicial,
+      tiempoEstimadoSegundos: 0,
+      velocidadFactor: 1.0,
+      nombreArchivo: files.length > 0 ? files[0].name : undefined,
+    });
 
     await new Promise((r) => setTimeout(r, 400));
 
@@ -567,7 +601,13 @@ export default function TranscriptionPanel(): React.ReactElement {
 
         const file = files[i];
         const prefijoArchivo = files.length > 1 ? `[Archivo ${i + 1} de ${files.length}] ` : '';
-        setStatusMessage(`${prefijoArchivo}Etapa 1 de ${totalEtapas}: Iniciando procesamiento de "${file.name}" [Whisper: ${model}]...`);
+        const msgArchivo = `${prefijoArchivo}Etapa 1 de ${totalEtapasNum}: Iniciando procesamiento de "${file.name}" [Whisper: ${model}]...`;
+        setStatusMessage(msgArchivo);
+        setTelemetriaActual((prev) => ({
+          ...prev,
+          nombreArchivo: file.name,
+          mensaje: msgArchivo,
+        }));
 
         let audioBlobUrl: string | undefined = undefined;
         try {
@@ -578,15 +618,25 @@ export default function TranscriptionPanel(): React.ReactElement {
           // Ignorar si no está disponible URL.createObjectURL en el entorno
         }
 
-        // Procesamiento acústico real con VAD y diarización (opcional)
-        const resultadoAudio = await AudioTranscriptionEngine.procesarArchivo(file, {
-          model,
-          language,
+        // Procesamiento acústico real desacoplado con Inyección de Dependencias
+        const resultadoAudio = await transcriptionEngine.transcribirArchivo(file, {
+          modelo: model,
+          idioma: language,
           diarizar: diarizarHablantes,
-          onProgreso: (porcentaje, mensaje) => {
+          onProgreso: (telemetria: TelemetriaTranscripcion) => {
             if (!cancelacionSolicitada.current) {
-              setProgress(porcentaje);
-              setStatusMessage(`${prefijoArchivo}${mensaje}`);
+              setProgress(telemetria.porcentaje);
+              const msgFull = `${prefijoArchivo}${telemetria.mensaje}`;
+              setStatusMessage(msgFull);
+              setTelemetriaActual({
+                porcentaje: telemetria.porcentaje,
+                etapaActual: telemetria.etapaActual,
+                totalEtapas: telemetria.totalEtapas,
+                mensaje: msgFull,
+                tiempoEstimadoSegundos: telemetria.tiempoEstimadoSegundos || 0,
+                velocidadFactor: telemetria.velocidadFactor || 1.0,
+                nombreArchivo: file.name,
+              });
             }
           },
         });
@@ -664,7 +714,7 @@ export default function TranscriptionPanel(): React.ReactElement {
           destinationFolder: carpetaDestino,
           outputs: salidasBD,
           status: 'completado',
-          rawSegments: resultadoAudio.segments,
+          rawSegments: resultadoAudio.rawSegments,
           textContent: resultadoAudio.txtContent,
           srtContent: resultadoAudio.srtContent,
           audioBlobUrl: audioBlobUrl,
@@ -674,7 +724,7 @@ export default function TranscriptionPanel(): React.ReactElement {
         records.push({
           ...record,
           transcriptionId: registroBD.id,
-          rawSegments: resultadoAudio.segments,
+          rawSegments: resultadoAudio.rawSegments,
           textContent: resultadoAudio.txtContent,
           srtContent: resultadoAudio.srtContent,
           audioUrl: audioBlobUrl,
@@ -684,24 +734,47 @@ export default function TranscriptionPanel(): React.ReactElement {
       if (cancelacionSolicitada.current) {
         setStatusMessage('⏹ Transcripción cancelada por el usuario.');
         setProgress(0);
+        setTelemetriaActual((prev) => ({
+          ...prev,
+          porcentaje: 0,
+          mensaje: '⏹ Transcripción cancelada por el usuario.',
+          tiempoEstimadoSegundos: 0,
+        }));
       } else {
         setTranscriptionRecords(records);
         setHistorialBD(TranscriptionDatabase.obtenerTodas());
         setProgress(100);
-        setStatusMessage(
-          records.length === 1
-            ? `Transcripción completada con éxito con OpenAI Whisper. Puedes revisar y validar los hablantes desde el historial.`
-            : `${records.length} transcripciones completadas con éxito con OpenAI Whisper. Puedes revisar y validar los hablantes desde el historial.`
-        );
+        const msgFinal = records.length === 1
+          ? `Transcripción completada con éxito con OpenAI Whisper. Archivos generados listos para descarga.`
+          : `${records.length} transcripciones completadas con éxito con OpenAI Whisper. Archivos generados listos para descarga.`;
+        setStatusMessage(msgFinal);
+        setTelemetriaActual((prev) => ({
+          ...prev,
+          porcentaje: 100,
+          mensaje: msgFinal,
+          tiempoEstimadoSegundos: 0,
+        }));
       }
     } catch (err: any) {
       if (cancelacionSolicitada.current) {
         setStatusMessage('⏹ Transcripción cancelada por el usuario.');
         setProgress(0);
+        setTelemetriaActual((prev) => ({
+          ...prev,
+          porcentaje: 0,
+          mensaje: '⏹ Transcripción cancelada por el usuario.',
+          tiempoEstimadoSegundos: 0,
+        }));
       } else {
         console.error('Error durante la transcripción:', err);
         const msg = err?.message || String(err);
         setStatusMessage(`❌ Error en la transcripción: ${msg}`);
+        setTelemetriaActual((prev) => ({
+          ...prev,
+          porcentaje: 0,
+          mensaje: `❌ Error en la transcripción: ${msg}`,
+          tiempoEstimadoSegundos: 0,
+        }));
         alert(`No se pudo completar la transcripción con OpenAI Whisper:\n\n${msg}`);
       }
     } finally {
@@ -874,7 +947,7 @@ export default function TranscriptionPanel(): React.ReactElement {
                 handleAbrirRevisor(historialBD[0].fileName, historialBD[0].id, historialBD[0].audioBlobUrl, historialBD[0].rawSegments);
               } else {
                 alert(
-                  'No hay transcripciones disponibles para revisar.\n\nEl sistema inicia con datos en cero. Para comenzar, carga y transcribe un archivo de audio o video en la pantalla principal.\n\nPuedes consultar el Tutorial interactivo para ver ejemplos guiados de uso.'
+                  'No hay expedientes en el Módulo Pericial Forense.\n\nPara comenzar, realiza una transcripción en la pantalla principal o carga un archivo sonoro.\n\nPuedes consultar el Tutorial interactivo para ver ejemplos guiados de uso.'
                 );
               }
             }}
@@ -899,9 +972,9 @@ export default function TranscriptionPanel(): React.ReactElement {
               e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.06)';
               e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.35)';
             }}
-            title="Identificar personas hablantes, generar hash de integridad y validar para emitir el informe oficial"
+            title="Accede al subsistema pericial forense para auditar evidencias, identificar interlocutores, validar hashes y emitir dictámenes certificados"
           >
-            👥 Revisar y Validar Hablantes
+            ⚖️ Módulo Pericial Forense
           </button>
 
           <button
@@ -1428,38 +1501,19 @@ export default function TranscriptionPanel(): React.ReactElement {
           <DonateButton />
         </div>
 
-        {/* Mensaje de estado y barra de progreso */}
-        {(isRunning || statusMessage) && (
-          <div style={{ marginTop: '1.5rem', backgroundColor: THEME_TOKENS.colors.bgSecondary, padding: '1.25rem', borderRadius: THEME_TOKENS.radii.sm, border: `1px solid ${THEME_TOKENS.colors.borderSubtle}` }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.65rem', flexWrap: 'wrap', gap: '0.5rem' }}>
-              <p style={{ margin: 0, fontSize: '0.825rem', color: THEME_TOKENS.colors.textPrimary, fontWeight: 500 }}>
-                {statusMessage}
-              </p>
-              {isRunning && (
-                <button
-                  onClick={handleCancelarTranscripcion}
-                  disabled={isCanceling}
-                  style={{
-                    background: '#fef2f2',
-                    border: '1px solid #dc2626',
-                    color: '#dc2626',
-                    borderRadius: THEME_TOKENS.radii.sm,
-                    padding: '0.25rem 0.65rem',
-                    fontSize: '0.75rem',
-                    fontWeight: 600,
-                    cursor: isCanceling ? 'not-allowed' : 'pointer',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '0.35rem',
-                  }}
-                  title="Detener transcripción de inmediato"
-                >
-                  🛑 {isCanceling ? 'Cancelando...' : 'Cancelar'}
-                </button>
-              )}
-            </div>
-            <ProgressBar progress={progress} />
-          </div>
+        {/* Barra de progreso mejorada con % y tiempo estimado de completado (ETA) */}
+        {(isRunning || telemetriaActual.mensaje || statusMessage) && (
+          <TranscriptionProgressBar
+            porcentaje={isRunning ? telemetriaActual.porcentaje : (statusMessage.startsWith('❌') ? 0 : 100)}
+            etapaActual={telemetriaActual.etapaActual}
+            totalEtapas={telemetriaActual.totalEtapas}
+            mensaje={telemetriaActual.mensaje || statusMessage}
+            tiempoEstimadoSegundos={telemetriaActual.tiempoEstimadoSegundos}
+            velocidadFactor={telemetriaActual.velocidadFactor}
+            nombreArchivo={telemetriaActual.nombreArchivo}
+            enCancelar={handleCancelarTranscripcion}
+            cancelando={isCanceling}
+          />
         )}
 
         {/* Resultados Estilizados como Folios Documentales con Nombres Idénticos al Archivo Fuente */}
@@ -1539,13 +1593,13 @@ export default function TranscriptionPanel(): React.ReactElement {
                         gap: '0.4rem',
                         marginTop: '0.25rem',
                       }}
-                      title="Identificar personas hablantes, generar hash de integridad y validar para emitir el informe oficial"
+                      title="Abrir Módulo Pericial para auditar cadena de custodia e interlocutores"
                     >
-                      <span>👥</span>
-                      <span>Revisar y Validar Hablantes</span>
+                      <span>⚖️</span>
+                      <span>Módulo Pericial Forense</span>
                     </button>
 
-                    {/* Botón de Informe Oficial condicionado a revisión pericial */}
+                    {/* Botón de Dictamen Pericial Oficial condicionado a validación forense */}
                     {(() => {
                       const itemBD = record.transcriptionId
                         ? TranscriptionDatabase.buscarPorId(record.transcriptionId)
@@ -1576,12 +1630,12 @@ export default function TranscriptionPanel(): React.ReactElement {
                           }}
                           title={
                             estaRevisado
-                              ? 'Descargar Informe Oficial de Transcripción y Acta Pericial'
-                              : '🔒 Bloqueado: Primero debes revisar los hablantes y marcar como revisada para emitir el informe.'
+                              ? 'Descargar Dictamen Pericial Oficial Certificado'
+                              : 'Emite el dictamen pericial tras validar interlocutores y hash en el Módulo Pericial'
                           }
                         >
-                          <span>{estaRevisado ? '📑' : '🔒'}</span>
-                          <span>{estaRevisado ? 'Descargar Informe Oficial' : 'Informe Bloqueado (Sin revisar)'}</span>
+                          <span>{estaRevisado ? '📑' : '⚖️'}</span>
+                          <span>{estaRevisado ? 'Descargar Dictamen Oficial' : 'Emitir Dictamen Pericial'}</span>
                         </button>
                       );
                     })()}

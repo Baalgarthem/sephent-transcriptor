@@ -212,14 +212,14 @@ def auditar_modelos():
     }, ensure_ascii=False))
 
 
-def descargar_modelo(modelo_id: str):
+def descargar_modelo(modelo_id: str, cache_dir: str = None):
     """Descarga el modelo especificado con telemetria de progreso por stdout."""
     def_mod = WHISPER_CATALOGO.get(modelo_id)
     if not def_mod:
         print(json.dumps({"type": "error", "mensaje": f"Modelo '{modelo_id}' no existe en catalogo"}))
         sys.exit(1)
 
-    dir_cache = obtener_directorio_cache_oficial()
+    dir_cache = cache_dir if cache_dir else obtener_directorio_cache_oficial()
     os.makedirs(dir_cache, exist_ok=True)
 
     nombre_archivo = def_mod["archivo"]
@@ -365,6 +365,7 @@ def main():
     parser.add_argument("--check-env", action="store_true", help="Comprobar dependencias del sistema")
     parser.add_argument("--audit-models", action="store_true", help="Auditar modelos existentes en cache oficial")
     parser.add_argument("--download", type=str, help="ID del modelo a descargar (tiny, base, small, medium, large, turbo)")
+    parser.add_argument("--cache-dir", type=str, default=None, help="Directorio destino de descarga personalizada")
     args = parser.parse_args()
 
     if args.check_env:
@@ -372,7 +373,7 @@ def main():
     elif args.audit_models:
         auditar_modelos()
     elif args.download:
-        descargar_modelo(args.download)
+        descargar_modelo(args.download, cache_dir=args.cache_dir)
     else:
         parser.print_help()
 
