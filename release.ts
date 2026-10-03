@@ -1,27 +1,25 @@
 #!/usr/bin/env node
 /**
  * ============================================================================
- * Sephent Transcriptor — Gestor Maestro de Versiones y Compilación de EXEs
+ * Sephent Transcriptor — Gestor Maestro de Versiones, Dist e Instalables
  * ============================================================================
- * Script canónico en el ROOT del proyecto encargado de:
- * 1. Administración SemVer: incremento atómico de versiones PATCH, MINOR y MAJOR.
- * 2. Sincronización multi-archivo (package.json, Cargo.toml, tauri.conf.json).
- * 3. Ejecución de pruebas unitarias forenses (13 suites automatizadas).
- * 4. Compilación del frontend web optimizado (Vite).
- * 5. Compilación y generación de ejecutables nativos Windows:
- *    - Instalador ejecutable NSIS Setup (.exe)
- *    - Instalador administrativo MSI (.msi)
- *    - Binario ejecutable standalone portable (.exe)
- *    - Paquete de distribución ZIP portable (.zip)
- * 6. Generación de manifiesto criptográfico SHA-256 (SHA256SUMS.txt).
+ * Script canónico en el ROOT del proyecto que permite:
+ * 1. Menú interactivo guiado para administración SemVer (PATCH, MINOR, MAJOR, manual).
+ * 2. Compilar y sincronizar artefactos en carpetas dist/ y dist-web/.
+ * 3. Compilar instaladores nativos para Windows (.exe Setup NSIS, .msi, Portable .exe y .zip).
+ * 4. Reportar con máxima claridad las rutas absolutas donde se generaron los instalables.
+ * 5. Flujo Git integrado: git add, git commit y git push a la rama remota.
+ * 6. Pipeline completo automatizado todo-en-uno.
  *
- * Uso:
+ * Formas de ejecución:
  *   npx tsx release.ts                  # Modo menú interactivo
- *   npx tsx release.ts --patch --build  # Sube patch y compila todos los EXEs
- *   npx tsx release.ts --minor --build  # Sube minor y compila todos los EXEs
- *   npx tsx release.ts --major --build  # Sube major y compila todos los EXEs
- *   npx tsx release.ts --build-only     # Compila EXEs de la versión actual
- *   npx tsx release.ts --help           # Muestra opciones y comandos
+ *   npm run release                     # Alias npm del menú interactivo
+ *   npx tsx deploy.ts                   # Alias directo
+ *   npx tsx release.ts --dist-only      # Solo compilar frontend en dist/ y dist-web/
+ *   npx tsx release.ts --installers-only# Solo compilar instaladores y mostrar rutas
+ *   npx tsx release.ts --git            # Flujo interactivo de git add, commit y push
+ *   npx tsx release.ts --patch --build  # Incrementar patch y compilar instaladores
+ *   npx tsx release.ts --help           # Ayuda y documentación
  */
 
 import * as fs from 'fs';
@@ -34,6 +32,8 @@ const ROOT_DIR = process.cwd();
 const PKG_PATH = path.join(ROOT_DIR, 'package.json');
 const CARGO_PATH = path.join(ROOT_DIR, 'src-tauri', 'Cargo.toml');
 const TAURI_CONF_PATH = path.join(ROOT_DIR, 'src-tauri', 'tauri.conf.json');
+const DIST_WEB_DIR = path.join(ROOT_DIR, 'dist-web');
+const DIST_DIR = path.join(ROOT_DIR, 'dist');
 const DIST_PORTABLE_DIR = path.join(ROOT_DIR, 'dist-portable');
 const DIST_RELEASE_DIR = path.join(ROOT_DIR, 'dist-release');
 
@@ -74,7 +74,7 @@ function logError(msg: string) {
 }
 
 function logHeader(title: string) {
-  const line = '═'.repeat(68);
+  const line = '═'.repeat(70);
   console.log(`\n${colors.bright}${colors.cyan}${line}${colors.reset}`);
   console.log(`${colors.bright}${colors.white}  ${title}${colors.reset}`);
   console.log(`${colors.bright}${colors.cyan}${line}${colors.reset}\n`);
@@ -82,7 +82,7 @@ function logHeader(title: string) {
 
 function runCmd(cmd: string, cwd = ROOT_DIR): Promise<string> {
   return new Promise((resolve, reject) => {
-    exec(cmd, { cwd, windowsHide: true, maxBuffer: 1024 * 1024 * 16 }, (err, stdout, stderr) => {
+    exec(cmd, { cwd, windowsHide: true, maxBuffer: 1024 * 1024 * 32 }, (err, stdout, stderr) => {
       if (err) {
         reject(new Error(`Comando falló (${cmd}): ${stderr || err.message}`));
       } else {
@@ -101,6 +101,20 @@ function runCmdLive(cmd: string, args: string[], cwd = ROOT_DIR): Promise<number
     });
     child.on('error', reject);
   });
+}
+
+export function abrirCarpetaEnExplorador(ruta: string): void {
+  try {
+    if (process.platform === 'win32') {
+      spawn('explorer.exe', [ruta], { detached: true, stdio: 'ignore' });
+    } else if (process.platform === 'darwin') {
+      spawn('open', [ruta], { detached: true, stdio: 'ignore' });
+    } else {
+      spawn('xdg-open', [ruta], { detached: true, stdio: 'ignore' });
+    }
+  } catch (err: any) {
+    logWarn(`No se pudo abrir el explorador automáticamente: ${err.message}`);
+  }
 }
 
 // ============================================================================
@@ -154,7 +168,7 @@ export function calcularSiguienteVersion(actual: string, tipo: 'patch' | 'minor'
 export function sincronizarVersionEnArchivos(nuevaVersion: string): void {
   parseSemVer(nuevaVersion); // Valida formato antes de escribir
 
-  logInfo(`Sincronizando versión ${colors.bright}${nuevaVersion}${colors.reset} en todos los archivos del proyecto...`);
+  logInfo(`Sincronizando versión ${colors.bright}${nuevaVersion}${colors.reset} en todos los manifiestos del proyecto...`);
 
   // 1. package.json
   const pkg = JSON.parse(fs.readFileSync(PKG_PATH, 'utf8'));
@@ -220,6 +234,14 @@ export async function verificarEntorno(): Promise<boolean> {
     todoListo = false;
   }
 
+  // Git
+  try {
+    const gitV = (await runCmd('git --version')).trim();
+    logSuccess(`Git: ${gitV}`);
+  } catch {
+    logWarn('Git no detectado en PATH.');
+  }
+
   // Python
   try {
     const pyV = (await runCmd('python --version')).trim();
@@ -272,9 +294,9 @@ export async function ejecutarPruebas(): Promise<boolean> {
 }
 
 // ============================================================================
-// 4. Compilación del Frontend (Vite)
+// 4. Compilación del Frontend (Vite) y Generación de dist/ y dist-web/
 // ============================================================================
-export async function compilarFrontend(): Promise<void> {
+export async function compilarFrontend(): Promise<{ distWeb: string; dist: string }> {
   logHeader('COMPILANDO FRONTEND WEB (VITE)');
   logInfo('Ejecutando npx tsc --noEmit (verificación de tipos)...');
   await runCmdLive('npx', ['tsc', '--noEmit']);
@@ -283,10 +305,20 @@ export async function compilarFrontend(): Promise<void> {
   logInfo('Ejecutando npx vite build (empaquetado dist-web)...');
   await runCmdLive('npx', ['vite', 'build']);
   logSuccess('Artefactos web compilados exitosamente en dist-web.');
+
+  // Sincronizar también en la carpeta dist/ en el root
+  copiarCarpetaRecursivo(DIST_WEB_DIR, DIST_DIR);
+  logSuccess('Artefactos sincronizados en ambas carpetas de distribución web.');
+
+  console.log(`\n  ${colors.bright}Ubicación de archivos web generados:${colors.reset}`);
+  console.log(`    📁 ${DIST_DIR}`);
+  console.log(`    📁 ${DIST_WEB_DIR}\n`);
+
+  return { distWeb: DIST_WEB_DIR, dist: DIST_DIR };
 }
 
 // ============================================================================
-// 5. Compilación y Generación de Ejecutables (.EXE / Instaladores / Portable)
+// 5. Compilación y Generación de Instalables (.EXE / Setup / .MSI / Portable)
 // ============================================================================
 export interface OpcionesCompilacion {
   compilarInstaladores?: boolean;
@@ -298,9 +330,9 @@ export async function compilarEjecutables(opciones: OpcionesCompilacion = {}): P
   const version = obtenerVersionActual();
   const artefactosGenerados: string[] = [];
 
-  logHeader(`COMPILANDO EJECUTABLES PARA WINDOWS (VERSIÓN ${version})`);
+  logHeader(`COMPILANDO EJECUTABLES E INSTALABLES PARA WINDOWS (VERSIÓN ${version})`);
 
-  // Paso 1: Asegurar que frontend esté al día
+  // Paso 1: Compilar frontend y asegurar dist/ y dist-web/
   await compilarFrontend();
 
   // Paso 2: Si se requieren instaladores (MSI y NSIS), usar tauri build
@@ -412,7 +444,8 @@ export async function compilarEjecutables(opciones: OpcionesCompilacion = {}): P
 
   // Paso 4: Generar manifiesto de hashes criptográficos SHA-256
   if (artefactosGenerados.length > 0) {
-    await generarManifiestoSHA256(releaseVersionDir, artefactosGenerados);
+    const manifestPath = await generarManifiestoSHA256(releaseVersionDir, artefactosGenerados);
+    artefactosGenerados.push(manifestPath);
   }
 
   return artefactosGenerados;
@@ -451,16 +484,13 @@ export function sanitizarTimestamps(dir: string): void {
       sanitizarTimestamps(rutaCompleta);
     } else {
       try {
-        const stats = fs.statSync(rutaCompleta);
-        if (stats.mtime.getFullYear() < 1980) {
-          fs.utimesSync(rutaCompleta, fechaSegura, fechaSegura);
-        }
+        fs.utimesSync(rutaCompleta, fechaSegura, fechaSegura);
       } catch {}
     }
   }
 }
 
-export async function generarManifiestoSHA256(carpetaSalida: string, archivos: string[]): Promise<void> {
+export async function generarManifiestoSHA256(carpetaSalida: string, archivos: string[]): Promise<string> {
   logInfo('Calculando firmas criptográficas SHA-256 para integridad forense...');
   const lineas: string[] = [
     `# ==============================================================================`,
@@ -471,6 +501,7 @@ export async function generarManifiestoSHA256(carpetaSalida: string, archivos: s
   ];
 
   for (const archivo of archivos) {
+    if (archivo.endsWith('SHA256SUMS.txt')) continue;
     const buffer = fs.readFileSync(archivo);
     const hash = crypto.createHash('sha256').update(buffer).digest('hex');
     const nombre = path.basename(archivo);
@@ -482,19 +513,177 @@ export async function generarManifiestoSHA256(carpetaSalida: string, archivos: s
   const manifestPath = path.join(carpetaSalida, 'SHA256SUMS.txt');
   fs.writeFileSync(manifestPath, lineas.join('\n') + '\n', 'utf8');
   logSuccess(`Manifiesto de firmas guardado en: ${manifestPath}`);
+  return manifestPath;
+}
+
+/**
+ * Muestra el reporte formateado de dónde se generaron exactamente los instalables
+ */
+export function mostrarReporteInstalables(version: string, artefactos: string[]): string {
+  const releaseVersionDir = path.join(DIST_RELEASE_DIR, `v${version}`);
+
+  logHeader('📦 REPORTE FINAL: UBICACIÓN DE INSTALABLES Y EJECUTABLES');
+  console.log(`  ${colors.bright}Versión compilada:${colors.reset} ${colors.green}v${version}${colors.reset}`);
+  console.log(`  ${colors.bright}Directorio Principal de Distribución:${colors.reset}`);
+  console.log(`  ${colors.bright}${colors.yellow}📁 ${releaseVersionDir}${colors.reset}\n`);
+
+  console.log(`  ${colors.bright}Artefactos generados listos para distribución e instalación:${colors.reset}`);
+  console.log(`  ${colors.cyan}${'─'.repeat(68)}${colors.reset}`);
+
+  if (artefactos.length === 0) {
+    console.log(`  ${colors.yellow}⚠ No se encontraron artefactos empaquetados en la carpeta destino.${colors.reset}`);
+  } else {
+    for (const art of artefactos) {
+      const nombre = path.basename(art);
+      let etiqueta = '📄 Archivo';
+      if (nombre.endsWith('-Setup.exe')) etiqueta = '📦 Instalador NSIS Setup (.exe)';
+      else if (nombre.endsWith('.msi')) etiqueta = '📦 Instalador Administrativo MSI (.msi)';
+      else if (nombre.endsWith('-Portable.exe')) etiqueta = '⚡ Ejecutable Standalone Portable (.exe)';
+      else if (nombre.endsWith('-Portable.zip')) etiqueta = '🗜️ Paquete ZIP Portable (.zip)';
+      else if (nombre.endsWith('SHA256SUMS.txt')) etiqueta = '🛡️ Manifiesto Criptográfico SHA-256';
+
+      let tamanoStr = '';
+      if (fs.existsSync(art)) {
+        const stats = fs.statSync(art);
+        const mb = (stats.size / (1024 * 1024)).toFixed(2);
+        tamanoStr = `(${mb} MB)`;
+      }
+
+      console.log(`\n  ${colors.bright}${colors.white}${etiqueta}${colors.reset}`);
+      console.log(`    ${colors.green}• Ruta absoluta:${colors.reset} ${art}`);
+      if (tamanoStr) {
+        console.log(`    ${colors.cyan}• Tamaño:${colors.reset}        ${tamanoStr}`);
+      }
+    }
+  }
+
+  // Verificar carpeta portable
+  const portableExe = path.join(DIST_PORTABLE_DIR, 'Sephent Transcriptor.exe');
+  if (fs.existsSync(portableExe)) {
+    console.log(`\n  ${colors.bright}${colors.white}⚡ Carpeta Portable de Trabajo Inmediato:${colors.reset}`);
+    console.log(`    ${colors.green}• Directorio:${colors.reset}    ${DIST_PORTABLE_DIR}`);
+    console.log(`    ${colors.green}• Ejecutable:${colors.reset}    ${portableExe}`);
+  }
+
+  console.log(`\n  ${colors.cyan}${'─'.repeat(68)}${colors.reset}\n`);
+  return releaseVersionDir;
 }
 
 // ============================================================================
-// 6. Pipeline Completo: Bump + Tests + Build + EXEs + Hashes
+// 6. Funciones de Control de Versiones Git (Add, Commit, Push)
+// ============================================================================
+export async function obtenerRamaGitActual(): Promise<string> {
+  try {
+    const rama = (await runCmd('git rev-parse --abbrev-ref HEAD')).trim();
+    return rama || 'principal';
+  } catch {
+    return 'principal';
+  }
+}
+
+export async function obtenerEstadoGit(): Promise<{ cambiosPendientes: boolean; resumen: string }> {
+  try {
+    const status = (await runCmd('git status -s')).trim();
+    return {
+      cambiosPendientes: status.length > 0,
+      resumen: status,
+    };
+  } catch (err: any) {
+    return {
+      cambiosPendientes: false,
+      resumen: `Error obteniendo estado git: ${err.message}`,
+    };
+  }
+}
+
+export async function ejecutarGitAdd(): Promise<void> {
+  logInfo('Ejecutando git add . ...');
+  await runCmdLive('git', ['add', '.']);
+  logSuccess('Todos los cambios fueron agregados al área de preparación (git add .).');
+}
+
+export async function ejecutarGitCommit(mensaje: string): Promise<void> {
+  logInfo(`Ejecutando git commit con mensaje: "${mensaje}"...`);
+  await runCmdLive('git', ['commit', '-m', `"${mensaje}"`]);
+  logSuccess('Commit creado exitosamente.');
+}
+
+export async function ejecutarGitPush(rama?: string): Promise<void> {
+  const ramaDestino = rama || (await obtenerRamaGitActual());
+  logHeader(`SUBIENDO CAMBIOS AL REPOSITORIO REMOTO (GIT PUSH ORIGIN ${ramaDestino.toUpperCase()})`);
+  logInfo(`Ejecutando git push origin ${ramaDestino}...`);
+  await runCmdLive('git', ['push', 'origin', ramaDestino]);
+  logSuccess(`Cambios enviados exitosamente al repositorio remoto en la rama "${ramaDestino}".`);
+}
+
+export async function ejecutarFlujoGitInteractivo(mensajeSugerido?: string): Promise<void> {
+  logHeader('CONTROL DE VERSIONES GIT: ADD, COMMIT Y PUSH');
+
+  const { cambiosPendientes, resumen } = await obtenerEstadoGit();
+  const rama = await obtenerRamaGitActual();
+
+  console.log(`  ${colors.bright}Rama Git activa:${colors.reset} ${colors.green}${rama}${colors.reset}\n`);
+
+  if (!cambiosPendientes) {
+    logInfo('No hay cambios pendientes de preparación en el directorio de trabajo (working tree limpio).');
+    const empujar = (await preguntar(`¿Deseas ejecutar git push origin ${rama} para enviar commits locales pendientes? (s/n) [s]: `)).trim().toLowerCase();
+    if (empujar !== 'n' && empujar !== 'no') {
+      try {
+        await ejecutarGitPush(rama);
+      } catch (e: any) {
+        logError(`Error en git push: ${e.message}`);
+      }
+    } else {
+      logWarn('Operación git push omitida.');
+    }
+    return;
+  }
+
+  console.log(`  ${colors.bright}Archivos con cambios detectados:${colors.reset}\n`);
+  for (const line of resumen.split('\n')) {
+    console.log(`    ${colors.yellow}${line}${colors.reset}`);
+  }
+  console.log('');
+
+  const confirmarAdd = (await preguntar(`¿Deseas agregar todos los cambios (git add .) y registrar commit? (s/n) [s]: `)).trim().toLowerCase();
+  if (confirmarAdd !== 'n' && confirmarAdd !== 'no') {
+    await ejecutarGitAdd();
+
+    const versionActual = obtenerVersionActual();
+    const defaultMsg = mensajeSugerido || `release: v${versionActual}`;
+    const msgInput = (await preguntar(`Mensaje para el commit [Enter para "${defaultMsg}"]: `)).trim();
+    const finalMsg = msgInput || defaultMsg;
+
+    await ejecutarGitCommit(finalMsg);
+
+    const confirmarPush = (await preguntar(`\n¿Deseas subir los cambios al repositorio remoto ahora (git push origin ${rama})? (s/n) [s]: `)).trim().toLowerCase();
+    if (confirmarPush !== 'n' && confirmarPush !== 'no') {
+      try {
+        await ejecutarGitPush(rama);
+      } catch (e: any) {
+        logError(`Error en git push: ${e.message}`);
+      }
+    } else {
+      logInfo('El commit fue registrado localmente. Puedes hacer git push cuando lo desees.');
+    }
+  } else {
+    logWarn('Operación git cancelada por el usuario.');
+  }
+}
+
+// ============================================================================
+// 7. Pipeline Completo: Bump + Tests + Dist + Instalables + Git + Reporte
 // ============================================================================
 export async function ejecutarPipelineCompleto(
-  tipoBump: 'patch' | 'minor' | 'major',
-  opciones: { omitirPruebas?: boolean } = {}
+  tipoBump: 'patch' | 'minor' | 'major' | 'mantener',
+  opciones: { omitirPruebas?: boolean; hacerPush?: boolean } = {}
 ): Promise<void> {
   const versionActual = obtenerVersionActual();
-  const siguienteVersion = calcularSiguienteVersion(versionActual, tipoBump);
+  const siguienteVersion = tipoBump === 'mantener'
+    ? versionActual
+    : calcularSiguienteVersion(versionActual, tipoBump);
 
-  logHeader(`PIPELINE COMPLETO: ${versionActual} → ${siguienteVersion} (${tipoBump.toUpperCase()})`);
+  logHeader(`PIPELINE COMPLETO DE LIBERACIÓN: v${versionActual} → v${siguienteVersion}`);
 
   // 1. Entorno
   const entornoOk = await verificarEntorno();
@@ -512,24 +701,31 @@ export async function ejecutarPipelineCompleto(
     logWarn('Pruebas unitarias omitidas por bandera explícita.');
   }
 
-  // 3. Sincronizar Versiones
-  sincronizarVersionEnArchivos(siguienteVersion);
+  // 3. Sincronizar Versiones si hubo incremento
+  if (tipoBump !== 'mantener') {
+    sincronizarVersionEnArchivos(siguienteVersion);
+  }
 
   // 4. Compilar Ejecutables e Instaladores
   const artefactos = await compilarEjecutables({ compilarInstaladores: true, compilarStandalone: true });
 
-  // 5. Resumen Final
-  logHeader('LIBERACIÓN COMPLETADA CON ÉXITO');
-  logSuccess(`Versión ${siguienteVersion} generada y empaquetada satisfactoriamente.`);
-  logInfo(`Ubicación de artefactos listos para distribución:`);
-  log(`  📁 ${path.join(DIST_RELEASE_DIR, `v${siguienteVersion}`)}`);
-  for (const art of artefactos) {
-    log(`    • ${path.basename(art)}`);
+  // 5. Reportar ubicación de instalables
+  const carpeta = mostrarReporteInstalables(siguienteVersion, artefactos);
+
+  // 6. Git Add, Commit y Push si fue solicitado o interactivamente
+  if (opciones.hacerPush) {
+    await ejecutarGitAdd();
+    await ejecutarGitCommit(`release: v${siguienteVersion}`);
+    await ejecutarGitPush();
   }
+
+  logHeader('LIBERACIÓN FINALIZADA CON ÉXITO');
+  logSuccess(`Versión v${siguienteVersion} generada, empaquetada y documentada satisfactoriamente.`);
+  logInfo(`Carpeta de instalables: ${carpeta}`);
 }
 
 // ============================================================================
-// 7. Interfaz Interactiva de Línea de Comandos (CLI)
+// 8. Interfaz Interactiva de Línea de Comandos (CLI)
 // ============================================================================
 function preguntar(pregunta: string): Promise<string> {
   const rl = readline.createInterface({
@@ -552,21 +748,25 @@ export async function iniciarModoInteractivo(): Promise<void> {
     const patchNext = calcularSiguienteVersion(actual, 'patch');
     const minorNext = calcularSiguienteVersion(actual, 'minor');
     const majorNext = calcularSiguienteVersion(actual, 'major');
+    const ramaActual = await obtenerRamaGitActual();
 
-    logHeader('SEPHENT TRANSCRIPTOR — GESTOR DE VERSIONES Y COMPILACIÓN DE EXEs');
-    console.log(`  ${colors.bright}Versión actual:${colors.reset} ${colors.green}${actual}${colors.reset}\n`);
-    console.log(`  ${colors.cyan}[1]${colors.reset} Subir versión ${colors.bright}PATCH${colors.reset}  (${actual} → ${colors.yellow}${patchNext}${colors.reset}) y sincronizar`);
-    console.log(`  ${colors.cyan}[2]${colors.reset} Subir versión ${colors.bright}MINOR${colors.reset}  (${actual} → ${colors.yellow}${minorNext}${colors.reset}) y sincronizar`);
-    console.log(`  ${colors.cyan}[3]${colors.reset} Subir versión ${colors.bright}MAJOR${colors.reset}  (${actual} → ${colors.yellow}${majorNext}${colors.reset}) y sincronizar`);
-    console.log(`  ${colors.cyan}[4]${colors.reset} Ingresar versión personalizada manual`);
-    console.log(`  ${colors.cyan}[5]${colors.reset} Compilar solo Frontend Web (npx vite build)`);
-    console.log(`  ${colors.cyan}[6]${colors.reset} Compilar Ejecutables de la versión actual (.EXE / Setup / Portable)`);
-    console.log(`  ${colors.cyan}[7]${colors.reset} Ejecutar batería de 13 pruebas unitarias forenses`);
-    console.log(`  ${colors.cyan}[8]${colors.reset} ${colors.bright}${colors.green}PIPELINE COMPLETO AUTOMÁTICO${colors.reset} (Bump + Tests + Build + EXEs)`);
-    console.log(`  ${colors.cyan}[9]${colors.reset} Comprobar herramientas y salud del entorno`);
-    console.log(`  ${colors.cyan}[0]${colors.reset} Salir\n`);
+    logHeader('SEPHENT TRANSCRIPTOR — GESTOR DE VERSIONES Y DISTRIBUCIÓN');
+    console.log(`  ${colors.bright}Versión actual:${colors.reset} ${colors.green}v${actual}${colors.reset}`);
+    console.log(`  ${colors.bright}Rama Git activa:${colors.reset} ${colors.cyan}${ramaActual}${colors.reset}\n`);
 
-    const opcion = (await preguntar(`${colors.bright}Selecciona una opción [0-9]: ${colors.reset}`)).trim();
+    console.log(`  ${colors.cyan}[1]${colors.reset}  Subir versión ${colors.bright}PATCH${colors.reset}  (${actual} → ${colors.yellow}${patchNext}${colors.reset}) y sincronizar archivos`);
+    console.log(`  ${colors.cyan}[2]${colors.reset}  Subir versión ${colors.bright}MINOR${colors.reset}  (${actual} → ${colors.yellow}${minorNext}${colors.reset}) y sincronizar archivos`);
+    console.log(`  ${colors.cyan}[3]${colors.reset}  Subir versión ${colors.bright}MAJOR${colors.reset}  (${actual} → ${colors.yellow}${majorNext}${colors.reset}) y sincronizar archivos`);
+    console.log(`  ${colors.cyan}[4]${colors.reset}  Ingresar versión personalizada manual`);
+    console.log(`  ${colors.cyan}[5]${colors.reset}  ${colors.bright}Generar archivos en dist${colors.reset} (dist/ y dist-web/)`);
+    console.log(`  ${colors.cyan}[6]${colors.reset}  ${colors.bright}${colors.green}GENERAR INSTALABLES de Windows (.exe Setup / .msi / Portable / Hashes)${colors.reset}`);
+    console.log(`  ${colors.cyan}[7]${colors.reset}  ${colors.bright}Control de cambios Git${colors.reset}: git add, git commit y git push`);
+    console.log(`  ${colors.cyan}[8]${colors.reset}  ${colors.bright}${colors.yellow}PIPELINE COMPLETO TODO-EN-UNO${colors.reset} (Bump + Tests + Dist + Instalables + Git)`);
+    console.log(`  ${colors.cyan}[9]${colors.reset}  Ejecutar batería de 13 pruebas unitarias forenses`);
+    console.log(`  ${colors.cyan}[10]${colors.reset} Comprobar salud y dependencias del entorno`);
+    console.log(`  ${colors.cyan}[0]${colors.reset}  Salir\n`);
+
+    const opcion = (await preguntar(`${colors.bright}Selecciona una opción [0-10]: ${colors.reset}`)).trim();
 
     try {
       switch (opcion) {
@@ -592,46 +792,87 @@ export async function iniciarModoInteractivo(): Promise<void> {
           break;
         }
         case '5': {
-          await compilarFrontend();
+          const rutas = await compilarFrontend();
+          console.log(`\n  ${colors.bright}Archivos generados exitosamente en:${colors.reset}`);
+          console.log(`    📁 ${rutas.dist}`);
+          console.log(`    📁 ${rutas.distWeb}\n`);
           break;
         }
         case '6': {
-          await compilarEjecutables({ compilarInstaladores: true, compilarStandalone: true });
+          logHeader(`GENERANDO INSTALABLES PARA WINDOWS (VERSIÓN ${actual})`);
+          const artefactos = await compilarEjecutables({ compilarInstaladores: true, compilarStandalone: true });
+          const carpeta = mostrarReporteInstalables(actual, artefactos);
+
+          const abrir = (await preguntar(`¿Deseas abrir la carpeta de los instalables en el Explorador de Windows? (s/n) [s]: `)).trim().toLowerCase();
+          if (abrir !== 'n' && abrir !== 'no') {
+            abrirCarpetaEnExplorador(carpeta);
+          }
           break;
         }
         case '7': {
-          await ejecutarPruebas();
+          await ejecutarFlujoGitInteractivo();
           break;
         }
         case '8': {
-          console.log(`\n¿Qué tipo de incremento deseas aplicar?`);
+          console.log(`\n¿Qué tipo de incremento deseas aplicar para el release?`);
           console.log(`  [1] PATCH (${actual} → ${patchNext})`);
           console.log(`  [2] MINOR (${actual} → ${minorNext})`);
           console.log(`  [3] MAJOR (${actual} → ${majorNext})`);
-          console.log(`  [4] MANTENER versión actual (${actual}) y solo compilar`);
-          const sub = (await preguntar(`Elige incremento [1-4]: `)).trim();
-          if (sub === '1') await ejecutarPipelineCompleto('patch');
-          else if (sub === '2') await ejecutarPipelineCompleto('minor');
-          else if (sub === '3') await ejecutarPipelineCompleto('major');
-          else if (sub === '4') {
-            await ejecutarPruebas();
-            await compilarEjecutables({ compilarInstaladores: true, compilarStandalone: true });
-          } else {
-            logWarn('Opción cancelada.');
+          console.log(`  [4] MANTENER versión actual (${actual})`);
+          const sub = (await preguntar(`Elige incremento [1-4] [1]: `)).trim();
+          let tipo: 'patch' | 'minor' | 'major' | 'mantener' = 'patch';
+          if (sub === '2') tipo = 'minor';
+          else if (sub === '3') tipo = 'major';
+          else if (sub === '4') tipo = 'mantener';
+
+          const verFinal = tipo === 'mantener' ? actual : calcularSiguienteVersion(actual, tipo);
+
+          // 1. Pruebas
+          const pruebasOk = await ejecutarPruebas();
+          if (!pruebasOk) {
+            logError('Pruebas unitarias fallaron. Se cancela el pipeline.');
+            break;
+          }
+
+          // 2. Sincronizar versión
+          if (tipo !== 'mantener') {
+            sincronizarVersionEnArchivos(verFinal);
+          }
+
+          // 3. Compilar frontend y ejecutables
+          const artefactos = await compilarEjecutables({ compilarInstaladores: true, compilarStandalone: true });
+
+          // 4. Reporte detallado de dónde se generaron los instalables
+          const carpeta = mostrarReporteInstalables(verFinal, artefactos);
+
+          // 5. Preguntar Git add + push
+          const hacerGit = (await preguntar(`\n¿Deseas ejecutar git add, commit y git push para v${verFinal}? (s/n) [s]: `)).trim().toLowerCase();
+          if (hacerGit !== 'n' && hacerGit !== 'no') {
+            await ejecutarFlujoGitInteractivo(`release: v${verFinal}`);
+          }
+
+          // 6. Preguntar abrir carpeta
+          const abrir = (await preguntar(`¿Deseas abrir la carpeta de instalables en el Explorador de Windows? (s/n) [s]: `)).trim().toLowerCase();
+          if (abrir !== 'n' && abrir !== 'no') {
+            abrirCarpetaEnExplorador(carpeta);
           }
           break;
         }
         case '9': {
+          await ejecutarPruebas();
+          break;
+        }
+        case '10': {
           await verificarEntorno();
           break;
         }
         case '0': {
           salir = true;
-          logInfo('Sesión del gestor de liberaciones finalizada.');
+          logInfo('Sesión del gestor finalizada.');
           break;
         }
         default:
-          logWarn('Opción no reconocida. Ingresa un número del 0 al 9.');
+          logWarn('Opción no reconocida. Ingresa un número del 0 al 10.');
       }
     } catch (err: any) {
       logError(`Error durante la operación: ${err.message}`);
@@ -644,37 +885,40 @@ export async function iniciarModoInteractivo(): Promise<void> {
 }
 
 // ============================================================================
-// 8. Manejo de Argumentos CLI (Modo No Interactivo)
+// 9. Manejo de Argumentos CLI (Modo Directo / No Interactivo)
 // ============================================================================
 export async function main() {
   const args = process.argv.slice(2);
 
   if (args.includes('--help') || args.includes('-h')) {
     console.log(`
-${colors.bright}Sephent Transcriptor — Gestor Maestro de Versiones y Compilación${colors.reset}
+${colors.bright}Sephent Transcriptor — Gestor Maestro de Versiones, Dist e Instalables${colors.reset}
 
 ${colors.cyan}Uso:${colors.reset}
   npx tsx release.ts [opciones]
+  npm run release
 
 ${colors.cyan}Opciones:${colors.reset}
   --patch              Incrementa la versión PATCH (ej. 1.5.1 -> 1.5.2)
   --minor              Incrementa la versión MINOR (ej. 1.5.1 -> 1.6.0)
   --major              Incrementa la versión MAJOR (ej. 1.5.1 -> 2.0.0)
-  --version <v>        Establece una versión específica (ej. 2.0.0-rc1)
-  --build              Compila el frontend y los ejecutables tras el incremento
-  --build-only         Compila los ejecutables de la versión actual sin cambiar versión
-  --quick              Compila solo el ejecutable standalone sin empaquetar instaladores NSIS/MSI
-  --skip-tests         Omite la ejecución de las 13 suites de pruebas unitarias
+  --version <v>        Establece una versión específica (ej. 1.6.0)
+  --dist-only          Compila únicamente el frontend web en dist/ y dist-web/
+  --installers-only    Compila instaladores y ejecutables mostrando su ubicación
+  --build              Compila frontend e instaladores tras el incremento
+  --quick              Compila solo el binario standalone sin paquetes NSIS/MSI
+  --git, --push        Ejecuta git add, commit y git push
+  --skip-tests         Omite las 13 pruebas unitarias forenses
   --test-only          Ejecuta únicamente la batería de pruebas unitarias
-  --check              Verifica la salud del entorno (Node, Cargo, Tauri, Python)
+  --check              Verifica la salud del entorno (Node, Cargo, Tauri, Git, Python)
+  --open               Abre la carpeta de instalables en el explorador de Windows
   --help, -h           Muestra este mensaje de ayuda
 
-${colors.cyan}Ejemplos de comando:${colors.reset}
-  npx tsx release.ts                    # Abre el menú interactivo guiado
-  npx tsx release.ts --patch --build    # Genera una nueva versión patch y compila todos los EXEs
-  npx tsx release.ts --minor --build    # Genera una nueva versión minor y compila todos los EXEs
-  npx tsx release.ts --build-only       # Compila los EXEs de la versión actual
-  npx tsx release.ts --quick            # Compila rápidamente el .exe standalone para pruebas
+${colors.cyan}Ejemplos:${colors.reset}
+  npx tsx release.ts                      # Abre el menú interactivo guiado
+  npx tsx release.ts --dist-only          # Compila y genera los archivos en dist/
+  npx tsx release.ts --installers-only    # Compila instaladores y reporta su ubicación
+  npx tsx release.ts --patch --build --git# Pipeline automático completo
 `);
     return;
   }
@@ -688,10 +932,13 @@ ${colors.cyan}Ejemplos de comando:${colors.reset}
   const versionActual = obtenerVersionActual();
   const skipTests = args.includes('--skip-tests');
   const quick = args.includes('--quick');
+  const distOnly = args.includes('--dist-only');
+  const installersOnly = args.includes('--installers-only') || args.includes('--build-only');
   const buildRequested = args.includes('--build');
-  const buildOnly = args.includes('--build-only');
+  const gitRequested = args.includes('--git') || args.includes('--push');
   const testOnly = args.includes('--test-only');
   const checkOnly = args.includes('--check');
+  const openFolder = args.includes('--open');
 
   if (checkOnly) {
     await verificarEntorno();
@@ -701,6 +948,11 @@ ${colors.cyan}Ejemplos de comando:${colors.reset}
   if (testOnly) {
     const ok = await ejecutarPruebas();
     process.exit(ok ? 0 : 1);
+  }
+
+  if (distOnly) {
+    await compilarFrontend();
+    return;
   }
 
   let nuevaVersion: string | null = null;
@@ -729,19 +981,32 @@ ${colors.cyan}Ejemplos de comando:${colors.reset}
     logSuccess(`Versión actualizada a: ${nuevaVersion}`);
   }
 
-  if (buildRequested || buildOnly) {
+  const versionFinal = nuevaVersion || versionActual;
+
+  if (installersOnly || buildRequested) {
     if (!skipTests && !nuevaVersion) {
       const ok = await ejecutarPruebas();
       if (!ok) {
-        logError('Pruebas unitarias fallaron. Se cancela la compilación de ejecutables.');
+        logError('Pruebas unitarias fallaron. Se cancela la compilación.');
         process.exit(1);
       }
     }
-    await compilarEjecutables({
+
+    const artefactos = await compilarEjecutables({
       compilarInstaladores: !quick,
       compilarStandalone: true,
     });
-    logSuccess('Compilación de ejecutables finalizada con éxito.');
+
+    const carpeta = mostrarReporteInstalables(versionFinal, artefactos);
+    if (openFolder) {
+      abrirCarpetaEnExplorador(carpeta);
+    }
+  }
+
+  if (gitRequested) {
+    await ejecutarGitAdd();
+    await ejecutarGitCommit(`release: v${versionFinal}`);
+    await ejecutarGitPush();
   }
 }
 
