@@ -9,7 +9,7 @@
   },
   "package": {
     "productName": "Sephent Transcriptor",
-    "version": "1.5.3"
+    "version": "1.5.4"
   },
   "tauri": {
     "allowlist": {
@@ -98,7 +98,7 @@
         "fullscreen": false,
         "height": 840,
         "resizable": true,
-        "title": "Sephent Transcriptor v1.5.3",
+        "title": "Sephent Transcriptor v1.5.4",
         "width": 1200,
         "minHeight": 450,
         "minWidth": 360
