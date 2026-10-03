@@ -1328,11 +1328,15 @@ def transcribir(file_path: str, model_name: str, language: str,
                 pct_global = pct_inicio + frac * (pct_fin - pct_inicio)
                 processed_sec = min(audio_duration, current_frames / 100.0)
 
+                # Estimación de tiempo multi-etapa continua (Whisper + etapas posteriores)
+                overhead_post = (max(4.0, audio_duration * 0.08) + 2.0) if diarize else 2.0
                 if frac > 0.01:
                     total_time_est = elapsed / frac
-                    eta_sec = max(0, total_time_est - elapsed)
+                    eta_whisper = max(0.0, total_time_est - elapsed)
+                    eta_sec = eta_whisper + overhead_post
                 else:
-                    eta_sec = 0
+                    prior_whisper = max(5.0, (audio_duration / max(0.5, avg_speed)))
+                    eta_sec = max(3.0, prior_whisper + overhead_post)
 
                 if now - last_progress_emit[0] >= 0.25:
                     last_progress_emit[0] = now
@@ -1376,8 +1380,10 @@ def transcribir(file_path: str, model_name: str, language: str,
                     pct_inicio = 15.0
                     pct_fin = 70.0 if diarize else 90.0
                     pct_global = pct_inicio + frac * (pct_fin - pct_inicio)
+                    overhead_post = (max(4.0, audio_duration * 0.08) + 2.0) if diarize else 2.0
                     total_time_est = elapsed / max(0.01, frac)
-                    eta_sec = max(0, total_time_est - elapsed)
+                    eta_whisper = max(0.0, total_time_est - elapsed)
+                    eta_sec = eta_whisper + overhead_post
                     processed_sec = min(audio_duration, self.n / 100.0)
 
                     last_progress_emit[0] = now
@@ -1560,7 +1566,7 @@ def transcribir(file_path: str, model_name: str, language: str,
     # ── ETAPA 3/4: Diarización de interlocutores ──────────────────────────────
     prog_data = {
         "pct": 74.0,
-        "eta_sec": max(3, round(audio_duration * 0.05)),
+        "eta_sec": max(4, round(audio_duration * 0.08)) + 2,
         "speed": 2.5,
         "stage": 3,
         "substage": "Diarización de Voces",

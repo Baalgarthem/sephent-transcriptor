@@ -485,6 +485,7 @@ export const TEST_SUITES = [
   'tests/antiTruncation.test.ts',
   'tests/audioTranscriptionEngine.test.ts',
   'tests/diContainer.test.ts',
+  'tests/etaNormalization.test.ts',
   'tests/guiManager.test.ts',
   'tests/modelManager.test.ts',
   'tests/partialAndErrorResilience.test.ts',

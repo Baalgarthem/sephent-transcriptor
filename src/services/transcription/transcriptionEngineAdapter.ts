@@ -36,13 +36,31 @@ export class TranscriptionEngineAdapter implements ITranscriptionEngine {
           else etapa = 4;
         }
 
-        // ETA: preferir la del engine (Rust), si no, calcular con interpolación lineal
+        // ETA: preferir la del engine (Rust/Python), si no, calcular con estimación adaptativa dual
         let eta = extra?.tiempoEstimadoSegundos;
-        if (eta === undefined || eta === null || !isFinite(eta)) {
-          if (porcentaje > 2 && porcentaje < 100) {
-            const totalEst = transcurrido / (porcentaje / 100);
-            const etaRaw = totalEst - transcurrido;
-            eta = isFinite(etaRaw) && etaRaw >= 0 ? etaRaw : 0;
+        if (eta === undefined || eta === null || !isFinite(eta) || eta <= 0) {
+          const totalAudio = (extra?.totalSegundosAudio && extra.totalSegundosAudio > 0)
+            ? extra.totalSegundosAudio
+            : ((archivo as any).durationSeconds || null);
+
+          if (porcentaje > 3 && porcentaje < 99) {
+            const frac = porcentaje / 100;
+            const etaLineal = Math.max(1, (transcurrido / frac) - transcurrido);
+
+            if (totalAudio) {
+              const overheadDiarizar = opciones.diarizar ? 0.35 : 0.22;
+              const totalEsperado = Math.max(6, totalAudio * overheadDiarizar + 4);
+              const etaPrior = Math.max(2, totalEsperado - transcurrido);
+              // Ponderación suave: da más certidumbre a la extrapolación conforme avanza el porcentaje
+              const pesoLineal = Math.min(1.0, Math.max(0.15, (porcentaje - 5) / 25));
+              eta = pesoLineal * etaLineal + (1 - pesoLineal) * etaPrior;
+            } else {
+              eta = etaLineal;
+            }
+          } else if (totalAudio && porcentaje <= 3) {
+            const overheadDiarizar = opciones.diarizar ? 0.35 : 0.22;
+            const totalEsperado = Math.max(6, totalAudio * overheadDiarizar + 4);
+            eta = Math.max(3, totalEsperado - transcurrido);
           } else {
             eta = 0;
           }

@@ -154,42 +154,121 @@ export const TranscriptionProgressBar: React.FC<TranscriptionProgressBarProps> =
   enCancelar,
   cancelando = false,
 }) => {
-  // ── 1. Ticker de tiempo transcurrido independiente a 1 Hz ──
+  // ── 1. Referencias y Estados para el Modelo de Ticker a 1 Hz y Normalizador de ETA ──
   const inicioRef = useRef<number>(Date.now());
   const [segundosTranscurridos, setSegundosTranscurridos] = useState<number>(0);
 
+  const porcentajeObjetivo = Math.min(100, Math.max(0, porcentaje));
+  const esCompletado = porcentajeObjetivo >= 100;
+
+  // Referencias para el modelo dinámico de estimación de tiempo (ETA continuo y adaptativo)
+  const etaCalibradaRef = useRef<number>(0);
+  const [etaMostrada, setEtaMostrada] = useState<number>(0);
+  const ultimoPuntoVelocidadRef = useRef<{ tiempo: number; pct: number }>({ tiempo: Date.now(), pct: porcentaje });
+  const velocidadEmaRef = useRef<number>(1.0); // % de avance por segundo observado
+  const ultimaEtaBackendRef = useRef<number>(tiempoEstimadoSegundos);
+  ultimaEtaBackendRef.current = tiempoEstimadoSegundos;
+
+  // Reiniciar temporizadores y estimaciones iniciales (priors bayesianos) al cambiar de archivo
   useEffect(() => {
     inicioRef.current = Date.now();
     setSegundosTranscurridos(0);
+    ultimoPuntoVelocidadRef.current = { tiempo: Date.now(), pct: porcentaje };
+    velocidadEmaRef.current = 1.0;
 
-    const timer = setInterval(() => {
-      const transcurrido = Math.floor((Date.now() - inicioRef.current) / 1000);
-      setSegundosTranscurridos(transcurrido);
-    }, 1000);
+    let priorInicial = 25;
+    if (totalSegundosAudio && totalSegundosAudio > 0) {
+      priorInicial = Math.max(6, Math.round(totalSegundosAudio * (totalEtapas === 4 ? 0.38 : 0.25) + 3));
+    } else if (tiempoEstimadoSegundos > 0) {
+      priorInicial = tiempoEstimadoSegundos;
+    }
+    etaCalibradaRef.current = priorInicial;
+    setEtaMostrada(priorInicial);
+  }, [nombreArchivo]);
 
-    return () => clearInterval(timer);
-  }, []);
-
-  // ── 2. Suavizado de ETA con Exponential Moving Average (EMA) ──
-  const etaSuavizadaRef = useRef<number>(0);
-  const [etaMostrada, setEtaMostrada] = useState<number>(0);
-
+  // Recalibración adaptativa inmediata al recibir nuevas muestras de ETA del backend
   useEffect(() => {
     if (tiempoEstimadoSegundos > 0 && isFinite(tiempoEstimadoSegundos)) {
-      if (etaSuavizadaRef.current === 0) {
-        etaSuavizadaRef.current = tiempoEstimadoSegundos;
+      if (etaCalibradaRef.current <= 0) {
+        etaCalibradaRef.current = tiempoEstimadoSegundos;
       } else {
-        etaSuavizadaRef.current = 0.75 * etaSuavizadaRef.current + 0.25 * tiempoEstimadoSegundos;
+        // Amortiguación adaptativa: suavizar discrepancias sin saltos visuales bruscos (filtro pasa-bajas)
+        const diff = tiempoEstimadoSegundos - etaCalibradaRef.current;
+        if (Math.abs(diff) <= 3) {
+          etaCalibradaRef.current += diff * 0.45;
+        } else if (diff > 3) {
+          // El proceso tomó más tiempo: incrementar suavemente (máximo 2.5s por actualización)
+          etaCalibradaRef.current += Math.min(2.5, diff * 0.25);
+        } else {
+          // El proceso aceleró: reducir de forma fluida (máximo 3.0s por actualización)
+          etaCalibradaRef.current += Math.max(-3.0, diff * 0.35);
+        }
       }
-      setEtaMostrada(Math.round(etaSuavizadaRef.current));
-    } else if (tiempoEstimadoSegundos <= 0) {
-      setEtaMostrada(0);
+      setEtaMostrada(Math.max(1, Math.round(etaCalibradaRef.current)));
     }
   }, [tiempoEstimadoSegundos]);
 
+  // Seguimiento de la velocidad física de avance (% / segundo) para normalización continua
+  useEffect(() => {
+    const ahora = Date.now();
+    const dt = (ahora - ultimoPuntoVelocidadRef.current.tiempo) / 1000;
+    const dp = porcentaje - ultimoPuntoVelocidadRef.current.pct;
+
+    if (dt >= 0.4 && dp > 0) {
+      const velInst = dp / dt;
+      velocidadEmaRef.current = 0.70 * velocidadEmaRef.current + 0.30 * velInst;
+      ultimoPuntoVelocidadRef.current = { tiempo: ahora, pct: porcentaje };
+    }
+  }, [porcentaje]);
+
+  // ── 2. Ticker de Reloj Real a 1 Hz y Normalización Dinámica de ETA en Vivo ──
+  // Decrementa el tiempo restante segundo a segundo en vivo y mantiene la sincronía sin congelamientos
+  useEffect(() => {
+    if (esCompletado) {
+      setEtaMostrada(0);
+      return;
+    }
+
+    const intervalId = setInterval(() => {
+      // 1. Tiempo transcurrido con precisión del reloj del sistema (segundo a segundo)
+      const transcurrido = Math.max(0, Math.floor((Date.now() - inicioRef.current) / 1000));
+      setSegundosTranscurridos(transcurrido);
+
+      // 2. Normalización de ETA en tiempo real (decremento continuo y convergencia suave)
+      if (etaCalibradaRef.current > 1) {
+        etaCalibradaRef.current -= 1.0;
+      }
+
+      setEtaMostrada(() => {
+        if (porcentajeObjetivo >= 100) return 0;
+
+        let etaTarget = etaCalibradaRef.current;
+        if ((etaTarget <= 0 || !isFinite(etaTarget)) && velocidadEmaRef.current > 0.05) {
+          const pctRestante = Math.max(0, 100 - porcentajeObjetivo);
+          etaTarget = Math.max(1, Math.round(pctRestante / velocidadEmaRef.current));
+          etaCalibradaRef.current = etaTarget;
+        }
+
+        const nuevoEta = Math.max(1, Math.round(etaCalibradaRef.current));
+
+        // Clamping contextual según la fase del pipeline
+        if (porcentajeObjetivo >= 98) {
+          // Fase final de ensamblado pericial / sellado: acotar a <= 2s
+          return Math.min(2, Math.max(1, nuevoEta));
+        } else if (porcentajeObjetivo >= 95) {
+          return Math.max(1, nuevoEta);
+        } else {
+          // En etapas activas anteriores, nunca caer a 0 prematuramente
+          return Math.max(2, nuevoEta);
+        }
+      });
+    }, 1000);
+
+    return () => clearInterval(intervalId);
+  }, [esCompletado, porcentajeObjetivo]);
+
   // ── 3. Micro-interpolador en tiempo real para barra "en vivo" ──
   // Permite que la barra avance de forma matemáticamente continua sin saltos bruscos
-  const porcentajeObjetivo = Math.min(100, Math.max(0, porcentaje));
   const [porcentajeVisual, setPorcentajeVisual] = useState<number>(porcentajeObjetivo);
   const pctVisualRef = useRef<number>(porcentajeVisual);
   pctVisualRef.current = porcentajeVisual;
@@ -234,7 +313,6 @@ export const TranscriptionProgressBar: React.FC<TranscriptionProgressBarProps> =
     return () => clearInterval(microTicker);
   }, [porcentajeObjetivo, etapaActual]);
 
-  const esCompletado = porcentajeObjetivo >= 100;
   const colorBarra = colorPorEtapa(etapaActual, esCompletado);
 
   const porcentajeTexto = esCompletado
@@ -649,7 +727,7 @@ export const TranscriptionProgressBar: React.FC<TranscriptionProgressBarProps> =
         <MetricCard
           label="Restante (ETA)"
           value={esCompletado ? '00:00' : etaMostrada > 0 ? `~${formatearTiempo(etaMostrada)}` : '--:--'}
-          sublabel={esCompletado ? 'concluido' : 'estimado'}
+          sublabel={esCompletado ? 'concluido' : 'en vivo normalizado'}
           highlight={!esCompletado && etaMostrada > 0}
           mono={true}
         />
