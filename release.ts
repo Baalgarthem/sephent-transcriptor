@@ -365,14 +365,41 @@ export function sincronizarVersionEnArchivos(nuevaVersion: string): void {
     }
   }
 
-  // 3. Sincronizar src-tauri/tauri.conf.json
+  // 3. Sincronizar src-tauri/tauri.conf.json (paquete y título de ventana nativa)
   if (fs.existsSync(TAURI_CONF_PATH)) {
     const tauriConf = JSON.parse(fs.readFileSync(TAURI_CONF_PATH, 'utf8'));
     if (tauriConf.package) {
       tauriConf.package.version = nuevaVersion;
     }
+    if (tauriConf.tauri?.windows?.[0]) {
+      tauriConf.tauri.windows[0].title = `Sephent Transcriptor v${nuevaVersion}`;
+    }
     fs.writeFileSync(TAURI_CONF_PATH, JSON.stringify(tauriConf, null, 2) + '\n', 'utf8');
-    logSuccess(`src-tauri/tauri.conf.json actualizado a ${nuevaVersion}`);
+    logSuccess(`src-tauri/tauri.conf.json actualizado a ${nuevaVersion} (versión y título de ventana)`);
+  }
+
+  // 4. Sincronizar src/config/appConfig.ts (constante de versión del frontend para todos los motores gráficos)
+  const appConfigPath = path.join(ROOT_DIR, 'src', 'config', 'appConfig.ts');
+  if (fs.existsSync(appConfigPath)) {
+    let appConfigContent = fs.readFileSync(appConfigPath, 'utf8');
+    const versionRegex = /(APP_VERSION\s*=\s*['"])([^'"]+)(['"])/;
+    if (versionRegex.test(appConfigContent)) {
+      appConfigContent = appConfigContent.replace(versionRegex, `$1${nuevaVersion}$3`);
+      fs.writeFileSync(appConfigPath, appConfigContent, 'utf8');
+      logSuccess(`src/config/appConfig.ts actualizado a ${nuevaVersion}`);
+    }
+  }
+
+  // 5. Sincronizar index.html (título del documento web)
+  const indexHtmlPath = path.join(ROOT_DIR, 'index.html');
+  if (fs.existsSync(indexHtmlPath)) {
+    let indexHtmlContent = fs.readFileSync(indexHtmlPath, 'utf8');
+    const titleRegex = /(<title>Sephent Transcriptor)(?: v[^<]+)?(<\/title>)/;
+    if (titleRegex.test(indexHtmlContent)) {
+      indexHtmlContent = indexHtmlContent.replace(titleRegex, `$1 v${nuevaVersion}$2`);
+      fs.writeFileSync(indexHtmlPath, indexHtmlContent, 'utf8');
+      logSuccess(`index.html actualizado a Sephent Transcriptor v${nuevaVersion}`);
+    }
   }
 }
 

@@ -8,6 +8,7 @@
 
 import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { THEME_TOKENS } from '../config/themeTokens';
+import { APP_VERSION } from '../config/appConfig';
 
 interface Props {
   children: ReactNode;
@@ -141,7 +142,7 @@ export class AppErrorBoundary extends Component<Props, State> {
 
             <p style={{ color: '#CBD5E1', fontSize: '0.9rem', lineHeight: '1.6', margin: '0 0 1.25rem 0' }}>
               Para evitar que el programa se cierre súbitamente y proteger todas las transcripciones en curso,
-              Sephent Transcriptor ha contenido la excepción de forma segura. Tus expedientes y datos en la base
+              Sephent Transcriptor v{APP_VERSION} ha contenido la excepción de forma segura. Tus expedientes y datos en la base
               de datos se mantienen íntegros.
             </p>
 

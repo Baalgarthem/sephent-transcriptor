@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { THEME_TOKENS } from '../config/themeTokens';
+import { APP_VERSION } from '../config/appConfig';
 
 interface HelpModalProps {
   abierto: boolean;
@@ -90,7 +91,7 @@ export const HelpModal: React.FC<HelpModalProps> = ({
                   letterSpacing: '0.02em',
                 }}
               >
-                Guía de Uso y Manual Didáctico — Sephent Transcriptor
+                Guía de Uso y Manual Didáctico — Sephent Transcriptor v{APP_VERSION}
               </h3>
               <span style={{ fontSize: '0.75rem', color: THEME_TOKENS.colors.textOnDarkMuted }}>
                 Aprende cómo funciona el sistema, sus reglas forenses y mejores prácticas

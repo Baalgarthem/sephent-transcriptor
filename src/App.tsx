@@ -1,10 +1,15 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { GUIRenderer } from './gui/components/GUIRenderer';
 import { GUISwitcher } from './gui/components/GUISwitcher';
 import { THEME_TOKENS } from './config/themeTokens';
+import { APP_VERSION } from './config/appConfig';
 import sephentLogo from './assets/sephent-3.svg';
 
 const App: React.FC = () => {
+  useEffect(() => {
+    document.title = `Sephent Transcriptor v${APP_VERSION}`;
+  }, []);
+
   return (
     <div className="app-viewport">
       <header className="app-header" style={{ position: 'relative' }}>
@@ -39,9 +44,39 @@ const App: React.FC = () => {
               display: 'inline-block',
             }}
           />
-          <h1 className="app-title font-serif" style={{ margin: 0 }}>
-            Sephent Transcriptor
-          </h1>
+          <div
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.65rem',
+              flexWrap: 'wrap',
+              justifyContent: 'center',
+            }}
+          >
+            <h1 className="app-title font-serif" style={{ margin: 0 }}>
+              Sephent Transcriptor
+            </h1>
+            <span
+              className="app-version-badge"
+              style={{
+                fontSize: '0.785rem',
+                fontWeight: 600,
+                color: THEME_TOKENS.colors.accentGold,
+                backgroundColor: 'rgba(146, 64, 14, 0.12)',
+                border: '1px solid rgba(146, 64, 14, 0.3)',
+                padding: '0.15rem 0.55rem',
+                borderRadius: THEME_TOKENS.radii.pill,
+                letterSpacing: '0.04em',
+                fontFamily: THEME_TOKENS.fonts.sans,
+                boxShadow: '0 1px 3px rgba(0, 0, 0, 0.25)',
+                userSelect: 'none',
+                verticalAlign: 'middle',
+              }}
+              title={`Versión activa del sistema: v${APP_VERSION}`}
+            >
+              v{APP_VERSION}
+            </span>
+          </div>
         </div>
         <p
           className="app-subtitle"
