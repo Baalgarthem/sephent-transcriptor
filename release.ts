@@ -6,19 +6,27 @@
  * Script canónico en el ROOT del proyecto que permite:
  * 1. Menú interactivo guiado para administración SemVer (PATCH, MINOR, MAJOR, manual).
  * 2. Compilar y sincronizar artefactos en carpetas dist/ y dist-web/.
- * 3. Compilar instaladores nativos para Windows (.exe Setup NSIS, .msi, Portable .exe y .zip).
- * 4. Reportar con máxima claridad las rutas absolutas donde se generaron los instalables.
- * 5. Flujo Git integrado: git add, git commit y git push a la rama remota.
- * 6. Pipeline completo automatizado todo-en-uno.
+ * 3. Compilar TODOS los instalables y el portable en una sola carpeta en root: "instalables/":
+ *    - Instalador ejecutable NSIS Setup (.exe)
+ *    - Instalador administrativo MSI (.msi)
+ *    - Binario ejecutable standalone portable con versión (.exe)
+ *    - Binario ejecutable standalone listo para usar ("Sephent Transcriptor.exe")
+ *    - Paquete comprimido ZIP portable listo para distribución (.zip)
+ *    - Librería nativa y herramientas de soporte (WebView2Loader.dll, tools/)
+ *    - Manifiesto criptográfico SHA-256 (SHA256SUMS.txt)
+ * 4. Reportar con máxima claridad la ubicación exacta de los instalables en pantalla.
+ * 5. Abrir la carpeta "instalables" en el explorador de Windows al finalizar.
+ * 6. Flujo Git integrado: git add, git commit y git push a la rama remota activa.
+ * 7. Pipeline completo automatizado todo-en-uno.
  *
  * Formas de ejecución:
- *   npx tsx release.ts                  # Modo menú interactivo
+ *   npx tsx release.ts                  # Modo menú interactivo guiado
  *   npm run release                     # Alias npm del menú interactivo
  *   npx tsx deploy.ts                   # Alias directo
  *   npx tsx release.ts --dist-only      # Solo compilar frontend en dist/ y dist-web/
- *   npx tsx release.ts --installers-only# Solo compilar instaladores y mostrar rutas
+ *   npx tsx release.ts --installers-only# Compilar instaladores en instalables/ y reportar
  *   npx tsx release.ts --git            # Flujo interactivo de git add, commit y push
- *   npx tsx release.ts --patch --build  # Incrementar patch y compilar instaladores
+ *   npx tsx release.ts --patch --build  # Incrementar patch y compilar en instalables/
  *   npx tsx release.ts --help           # Ayuda y documentación
  */
 
@@ -34,8 +42,9 @@ const CARGO_PATH = path.join(ROOT_DIR, 'src-tauri', 'Cargo.toml');
 const TAURI_CONF_PATH = path.join(ROOT_DIR, 'src-tauri', 'tauri.conf.json');
 const DIST_WEB_DIR = path.join(ROOT_DIR, 'dist-web');
 const DIST_DIR = path.join(ROOT_DIR, 'dist');
-const DIST_PORTABLE_DIR = path.join(ROOT_DIR, 'dist-portable');
-const DIST_RELEASE_DIR = path.join(ROOT_DIR, 'dist-release');
+
+// Carpeta única canónica en el root para todos los instalables y el portable
+const INSTALABLES_DIR = path.join(ROOT_DIR, 'instalables');
 
 // ============================================================================
 // Utilidades de Consola y Formato
@@ -318,7 +327,7 @@ export async function compilarFrontend(): Promise<{ distWeb: string; dist: strin
 }
 
 // ============================================================================
-// 5. Compilación y Generación de Instalables (.EXE / Setup / .MSI / Portable)
+// 5. Compilación y Generación de Instalables y Portable en "instalables/"
 // ============================================================================
 export interface OpcionesCompilacion {
   compilarInstaladores?: boolean;
@@ -330,7 +339,13 @@ export async function compilarEjecutables(opciones: OpcionesCompilacion = {}): P
   const version = obtenerVersionActual();
   const artefactosGenerados: string[] = [];
 
-  logHeader(`COMPILANDO EJECUTABLES E INSTALABLES PARA WINDOWS (VERSIÓN ${version})`);
+  logHeader(`COMPILANDO INSTALABLES Y PORTABLE PARA WINDOWS (v${version})`);
+  logInfo(`Directorio destino unificado: ${colors.bright}${INSTALABLES_DIR}${colors.reset}`);
+
+  // Asegurar que la carpeta única "instalables" exista en el root
+  if (!fs.existsSync(INSTALABLES_DIR)) {
+    fs.mkdirSync(INSTALABLES_DIR, { recursive: true });
+  }
 
   // Paso 1: Compilar frontend y asegurar dist/ y dist-web/
   await compilarFrontend();
@@ -347,16 +362,10 @@ export async function compilarEjecutables(opciones: OpcionesCompilacion = {}): P
     logSuccess('Compilación de binario standalone completada.');
   }
 
-  // Paso 3: Identificar y organizar ejecutables
+  // Paso 3: Identificar y organizar ejecutables en la carpeta única "instalables/"
   const targetReleaseDir = path.join(ROOT_DIR, 'src-tauri', 'target', 'release');
   const bundleNsisDir = path.join(targetReleaseDir, 'bundle', 'nsis');
   const bundleMsiDir = path.join(targetReleaseDir, 'bundle', 'msi');
-
-  // Crear carpeta de distribución final: dist-release/v<version>
-  const releaseVersionDir = path.join(DIST_RELEASE_DIR, `v${version}`);
-  if (!fs.existsSync(releaseVersionDir)) {
-    fs.mkdirSync(releaseVersionDir, { recursive: true });
-  }
 
   // 3.1 Binario Standalone (Sephent Transcriptor.exe)
   const exeStandaloneCandidates = [
@@ -372,38 +381,39 @@ export async function compilarEjecutables(opciones: OpcionesCompilacion = {}): P
   }
 
   if (standaloneExePath) {
-    const destStandalone = path.join(releaseVersionDir, `Sephent-Transcriptor-${version}-Portable.exe`);
-    fs.copyFileSync(standaloneExePath, destStandalone);
-    artefactosGenerados.push(destStandalone);
-    logSuccess(`Binario Standalone: ${path.basename(destStandalone)}`);
+    // A) Ejecutable portable nombrado con versión en instalables/
+    const destVersionedPortable = path.join(INSTALABLES_DIR, `Sephent-Transcriptor-${version}-Portable.exe`);
+    fs.copyFileSync(standaloneExePath, destVersionedPortable);
+    artefactosGenerados.push(destVersionedPortable);
+    logSuccess(`Ejecutable Portable Nombrado: ${path.basename(destVersionedPortable)}`);
 
-    // Sincronizar también dist-portable
-    if (!fs.existsSync(DIST_PORTABLE_DIR)) {
-      fs.mkdirSync(DIST_PORTABLE_DIR, { recursive: true });
-    }
-    const destInPortable = path.join(DIST_PORTABLE_DIR, 'Sephent Transcriptor.exe');
-    fs.copyFileSync(standaloneExePath, destInPortable);
+    // B) Ejecutable directo en instalables/ ("Sephent Transcriptor.exe") para doble clic inmediato
+    const destDirectPortable = path.join(INSTALABLES_DIR, 'Sephent Transcriptor.exe');
+    fs.copyFileSync(standaloneExePath, destDirectPortable);
+    artefactosGenerados.push(destDirectPortable);
+    logSuccess(`Ejecutable Portable Directo: ${path.basename(destDirectPortable)}`);
 
-    // Asegurar tools en dist-portable
+    // C) Sincronizar tools dentro de instalables/ para funcionamiento portable completo
     const toolsSrc = path.join(ROOT_DIR, 'tools');
-    const toolsDst = path.join(DIST_PORTABLE_DIR, 'tools');
+    const toolsDst = path.join(INSTALABLES_DIR, 'tools');
     copiarCarpetaRecursivo(toolsSrc, toolsDst);
 
-    // Asegurar WebView2Loader.dll si existe
+    // D) Sincronizar WebView2Loader.dll si existe
     const webviewSrc = path.join(ROOT_DIR, 'src-tauri', 'WebView2Loader.dll');
     if (fs.existsSync(webviewSrc)) {
-      fs.copyFileSync(webviewSrc, path.join(DIST_PORTABLE_DIR, 'WebView2Loader.dll'));
+      const webviewDst = path.join(INSTALABLES_DIR, 'WebView2Loader.dll');
+      fs.copyFileSync(webviewSrc, webviewDst);
+      artefactosGenerados.push(webviewDst);
     }
-    logSuccess('Carpeta dist-portable/ sincronizada con éxito.');
   }
 
-  // 3.2 Instalador NSIS (.exe)
+  // 3.2 Instalador NSIS (.exe) en instalables/
   if (fs.existsSync(bundleNsisDir)) {
     const nsisFiles = fs.readdirSync(bundleNsisDir).filter((f) => f.endsWith('.exe'));
     for (const f of nsisFiles) {
       if (f.includes(version)) {
         const src = path.join(bundleNsisDir, f);
-        const dst = path.join(releaseVersionDir, `Sephent-Transcriptor-${version}-Setup.exe`);
+        const dst = path.join(INSTALABLES_DIR, `Sephent-Transcriptor-${version}-Setup.exe`);
         fs.copyFileSync(src, dst);
         artefactosGenerados.push(dst);
         logSuccess(`Instalador NSIS Setup (.exe): ${path.basename(dst)}`);
@@ -411,13 +421,13 @@ export async function compilarEjecutables(opciones: OpcionesCompilacion = {}): P
     }
   }
 
-  // 3.3 Instalador MSI (.msi)
+  // 3.3 Instalador MSI (.msi) en instalables/
   if (fs.existsSync(bundleMsiDir)) {
     const msiFiles = fs.readdirSync(bundleMsiDir).filter((f) => f.endsWith('.msi'));
     for (const f of msiFiles) {
       if (f.includes(version)) {
         const src = path.join(bundleMsiDir, f);
-        const dst = path.join(releaseVersionDir, `Sephent-Transcriptor-${version}.msi`);
+        const dst = path.join(INSTALABLES_DIR, `Sephent-Transcriptor-${version}.msi`);
         fs.copyFileSync(src, dst);
         artefactosGenerados.push(dst);
         logSuccess(`Instalador MSI (.msi): ${path.basename(dst)}`);
@@ -425,15 +435,35 @@ export async function compilarEjecutables(opciones: OpcionesCompilacion = {}): P
     }
   }
 
-  // 3.4 Crear ZIP de la versión portable
+  // 3.4 Crear paquete ZIP de la versión portable en instalables/
   try {
     const zipName = `Sephent-Transcriptor-${version}-Portable.zip`;
-    const zipDst = path.join(releaseVersionDir, zipName);
+    const zipDst = path.join(INSTALABLES_DIR, zipName);
     if (fs.existsSync(zipDst)) fs.unlinkSync(zipDst);
 
     logInfo(`Empaquetando archivo ZIP portable (${zipName})...`);
-    sanitizarTimestamps(DIST_PORTABLE_DIR);
-    await runCmd(`powershell -Command "Compress-Archive -Path '${DIST_PORTABLE_DIR}/*' -DestinationPath '${zipDst}' -Force"`);
+
+    // Crear carpeta temporal staging para el ZIP
+    const stagingDir = path.join(ROOT_DIR, 'temp_portable_staging');
+    if (fs.existsSync(stagingDir)) fs.rmSync(stagingDir, { recursive: true, force: true });
+    fs.mkdirSync(stagingDir, { recursive: true });
+
+    if (standaloneExePath && fs.existsSync(standaloneExePath)) {
+      fs.copyFileSync(standaloneExePath, path.join(stagingDir, 'Sephent Transcriptor.exe'));
+    }
+    const webviewSrc = path.join(ROOT_DIR, 'src-tauri', 'WebView2Loader.dll');
+    if (fs.existsSync(webviewSrc)) {
+      fs.copyFileSync(webviewSrc, path.join(stagingDir, 'WebView2Loader.dll'));
+    }
+    copiarCarpetaRecursivo(path.join(ROOT_DIR, 'tools'), path.join(stagingDir, 'tools'));
+    sanitizarTimestamps(stagingDir);
+
+    await runCmd(`powershell -Command "Compress-Archive -Path '${stagingDir}/*' -DestinationPath '${zipDst}' -Force"`);
+
+    if (fs.existsSync(stagingDir)) {
+      fs.rmSync(stagingDir, { recursive: true, force: true });
+    }
+
     if (fs.existsSync(zipDst)) {
       artefactosGenerados.push(zipDst);
       logSuccess(`Paquete ZIP Portable: ${zipName}`);
@@ -442,9 +472,9 @@ export async function compilarEjecutables(opciones: OpcionesCompilacion = {}): P
     logWarn(`No se pudo crear el archivo ZIP automático: ${e.message}`);
   }
 
-  // Paso 4: Generar manifiesto de hashes criptográficos SHA-256
+  // Paso 4: Generar manifiesto de hashes criptográficos SHA-256 en instalables/
   if (artefactosGenerados.length > 0) {
-    const manifestPath = await generarManifiestoSHA256(releaseVersionDir, artefactosGenerados);
+    const manifestPath = await generarManifiestoSHA256(INSTALABLES_DIR, artefactosGenerados);
     artefactosGenerados.push(manifestPath);
   }
 
@@ -495,13 +525,17 @@ export async function generarManifiestoSHA256(carpetaSalida: string, archivos: s
   const lineas: string[] = [
     `# ==============================================================================`,
     `# Sephent Transcriptor — Manifiesto de Integridad Criptográfica SHA-256`,
+    `# Ubicación de archivos: ${carpetaSalida}`,
     `# Fecha de generación: ${new Date().toISOString()}`,
     `# ==============================================================================`,
     ``,
   ];
 
   for (const archivo of archivos) {
-    if (archivo.endsWith('SHA256SUMS.txt')) continue;
+    if (archivo.endsWith('SHA256SUMS.txt') || !fs.existsSync(archivo)) continue;
+    const stats = fs.statSync(archivo);
+    if (stats.isDirectory()) continue;
+
     const buffer = fs.readFileSync(archivo);
     const hash = crypto.createHash('sha256').update(buffer).digest('hex');
     const nombre = path.basename(archivo);
@@ -517,29 +551,32 @@ export async function generarManifiestoSHA256(carpetaSalida: string, archivos: s
 }
 
 /**
- * Muestra el reporte formateado de dónde se generaron exactamente los instalables
+ * Muestra el reporte formateado indicando con máxima claridad que todo se generó en "instalables/"
  */
 export function mostrarReporteInstalables(version: string, artefactos: string[]): string {
-  const releaseVersionDir = path.join(DIST_RELEASE_DIR, `v${version}`);
-
-  logHeader('📦 REPORTE FINAL: UBICACIÓN DE INSTALABLES Y EJECUTABLES');
+  logHeader('📦 REPORTE FINAL: UBICACIÓN DE INSTALABLES Y PORTABLE');
   console.log(`  ${colors.bright}Versión compilada:${colors.reset} ${colors.green}v${version}${colors.reset}`);
-  console.log(`  ${colors.bright}Directorio Principal de Distribución:${colors.reset}`);
-  console.log(`  ${colors.bright}${colors.yellow}📁 ${releaseVersionDir}${colors.reset}\n`);
+  console.log(`  ${colors.bright}Carpeta única en el ROOT del proyecto:${colors.reset}`);
+  console.log(`  ${colors.bright}${colors.yellow}📁 ${INSTALABLES_DIR}${colors.reset}\n`);
 
-  console.log(`  ${colors.bright}Artefactos generados listos para distribución e instalación:${colors.reset}`);
+  console.log(`  ${colors.bright}Todos los artefactos fueron generados en:${colors.reset}`);
   console.log(`  ${colors.cyan}${'─'.repeat(68)}${colors.reset}`);
 
   if (artefactos.length === 0) {
-    console.log(`  ${colors.yellow}⚠ No se encontraron artefactos empaquetados en la carpeta destino.${colors.reset}`);
+    console.log(`  ${colors.yellow}⚠ No se encontraron artefactos empaquetados en la carpeta instalables/.${colors.reset}`);
   } else {
-    for (const art of artefactos) {
+    // Filtrar duplicados y directorios
+    const unicos = Array.from(new Set(artefactos)).filter((a) => fs.existsSync(a) && !fs.statSync(a).isDirectory());
+
+    for (const art of unicos) {
       const nombre = path.basename(art);
       let etiqueta = '📄 Archivo';
       if (nombre.endsWith('-Setup.exe')) etiqueta = '📦 Instalador NSIS Setup (.exe)';
       else if (nombre.endsWith('.msi')) etiqueta = '📦 Instalador Administrativo MSI (.msi)';
-      else if (nombre.endsWith('-Portable.exe')) etiqueta = '⚡ Ejecutable Standalone Portable (.exe)';
-      else if (nombre.endsWith('-Portable.zip')) etiqueta = '🗜️ Paquete ZIP Portable (.zip)';
+      else if (nombre.endsWith('-Portable.exe')) etiqueta = '⚡ Ejecutable Portable Nombrado (.exe)';
+      else if (nombre === 'Sephent Transcriptor.exe') etiqueta = '⚡ Ejecutable Portable Directo (.exe listo para usar)';
+      else if (nombre.endsWith('-Portable.zip')) etiqueta = '🗜️ Paquete ZIP Portable (.zip listo para compartir)';
+      else if (nombre === 'WebView2Loader.dll') etiqueta = '🔧 Librería Nativa Requerida (DLL)';
       else if (nombre.endsWith('SHA256SUMS.txt')) etiqueta = '🛡️ Manifiesto Criptográfico SHA-256';
 
       let tamanoStr = '';
@@ -550,23 +587,22 @@ export function mostrarReporteInstalables(version: string, artefactos: string[])
       }
 
       console.log(`\n  ${colors.bright}${colors.white}${etiqueta}${colors.reset}`);
-      console.log(`    ${colors.green}• Ruta absoluta:${colors.reset} ${art}`);
+      console.log(`    ${colors.green}• Ruta:${colors.reset}   ${art}`);
       if (tamanoStr) {
-        console.log(`    ${colors.cyan}• Tamaño:${colors.reset}        ${tamanoStr}`);
+        console.log(`    ${colors.cyan}• Tamaño:${colors.reset} ${tamanoStr}`);
       }
     }
   }
 
-  // Verificar carpeta portable
-  const portableExe = path.join(DIST_PORTABLE_DIR, 'Sephent Transcriptor.exe');
-  if (fs.existsSync(portableExe)) {
-    console.log(`\n  ${colors.bright}${colors.white}⚡ Carpeta Portable de Trabajo Inmediato:${colors.reset}`);
-    console.log(`    ${colors.green}• Directorio:${colors.reset}    ${DIST_PORTABLE_DIR}`);
-    console.log(`    ${colors.green}• Ejecutable:${colors.reset}    ${portableExe}`);
+  const toolsEnInstalables = path.join(INSTALABLES_DIR, 'tools');
+  if (fs.existsSync(toolsEnInstalables)) {
+    console.log(`\n  ${colors.bright}${colors.white}📂 Subsistema de Herramientas Acoplado:${colors.reset}`);
+    console.log(`    ${colors.green}• Ruta:${colors.reset}   ${toolsEnInstalables}`);
+    console.log(`    ${colors.cyan}• Estado:${colors.reset} whisper_runner.py y diarización listos para ejecución autónoma.`);
   }
 
   console.log(`\n  ${colors.cyan}${'─'.repeat(68)}${colors.reset}\n`);
-  return releaseVersionDir;
+  return INSTALABLES_DIR;
 }
 
 // ============================================================================
@@ -625,7 +661,7 @@ export async function ejecutarFlujoGitInteractivo(mensajeSugerido?: string): Pro
   console.log(`  ${colors.bright}Rama Git activa:${colors.reset} ${colors.green}${rama}${colors.reset}\n`);
 
   if (!cambiosPendientes) {
-    logInfo('No hay cambios pendientes de preparación en el directorio de trabajo (working tree limpio).');
+    logInfo('No hay cambios pendientes en el directorio de trabajo (working tree limpio).');
     const empujar = (await preguntar(`¿Deseas ejecutar git push origin ${rama} para enviar commits locales pendientes? (s/n) [s]: `)).trim().toLowerCase();
     if (empujar !== 'n' && empujar !== 'no') {
       try {
@@ -672,7 +708,7 @@ export async function ejecutarFlujoGitInteractivo(mensajeSugerido?: string): Pro
 }
 
 // ============================================================================
-// 7. Pipeline Completo: Bump + Tests + Dist + Instalables + Git + Reporte
+// 7. Pipeline Completo: Bump + Tests + Dist + Instalables en instalables/ + Git
 // ============================================================================
 export async function ejecutarPipelineCompleto(
   tipoBump: 'patch' | 'minor' | 'major' | 'mantener',
@@ -706,13 +742,13 @@ export async function ejecutarPipelineCompleto(
     sincronizarVersionEnArchivos(siguienteVersion);
   }
 
-  // 4. Compilar Ejecutables e Instaladores
+  // 4. Compilar Ejecutables e Instaladores directamente en instalables/
   const artefactos = await compilarEjecutables({ compilarInstaladores: true, compilarStandalone: true });
 
   // 5. Reportar ubicación de instalables
   const carpeta = mostrarReporteInstalables(siguienteVersion, artefactos);
 
-  // 6. Git Add, Commit y Push si fue solicitado o interactivamente
+  // 6. Git Add, Commit y Push si fue solicitado
   if (opciones.hacerPush) {
     await ejecutarGitAdd();
     await ejecutarGitCommit(`release: v${siguienteVersion}`);
@@ -721,7 +757,7 @@ export async function ejecutarPipelineCompleto(
 
   logHeader('LIBERACIÓN FINALIZADA CON ÉXITO');
   logSuccess(`Versión v${siguienteVersion} generada, empaquetada y documentada satisfactoriamente.`);
-  logInfo(`Carpeta de instalables: ${carpeta}`);
+  logInfo(`Carpeta única de instalables en root: ${carpeta}`);
 }
 
 // ============================================================================
@@ -750,16 +786,17 @@ export async function iniciarModoInteractivo(): Promise<void> {
     const majorNext = calcularSiguienteVersion(actual, 'major');
     const ramaActual = await obtenerRamaGitActual();
 
-    logHeader('SEPHENT TRANSCRIPTOR — GESTOR DE VERSIONES Y DISTRIBUCIÓN');
-    console.log(`  ${colors.bright}Versión actual:${colors.reset} ${colors.green}v${actual}${colors.reset}`);
-    console.log(`  ${colors.bright}Rama Git activa:${colors.reset} ${colors.cyan}${ramaActual}${colors.reset}\n`);
+    logHeader('SEPHENT TRANSCRIPTOR — GESTOR DE VERSIONES Y GENERACIÓN DE INSTALABLES');
+    console.log(`  ${colors.bright}Versión actual:${colors.reset}    ${colors.green}v${actual}${colors.reset}`);
+    console.log(`  ${colors.bright}Carpeta de salida:${colors.reset} ${colors.yellow}instalables/${colors.reset} (carpeta única en el root)`);
+    console.log(`  ${colors.bright}Rama Git activa:${colors.reset}   ${colors.cyan}${ramaActual}${colors.reset}\n`);
 
-    console.log(`  ${colors.cyan}[1]${colors.reset}  Subir versión ${colors.bright}PATCH${colors.reset}  (${actual} → ${colors.yellow}${patchNext}${colors.reset}) y sincronizar archivos`);
-    console.log(`  ${colors.cyan}[2]${colors.reset}  Subir versión ${colors.bright}MINOR${colors.reset}  (${actual} → ${colors.yellow}${minorNext}${colors.reset}) y sincronizar archivos`);
-    console.log(`  ${colors.cyan}[3]${colors.reset}  Subir versión ${colors.bright}MAJOR${colors.reset}  (${actual} → ${colors.yellow}${majorNext}${colors.reset}) y sincronizar archivos`);
+    console.log(`  ${colors.cyan}[1]${colors.reset}  Subir versión ${colors.bright}PATCH${colors.reset}  (${actual} → ${colors.yellow}${patchNext}${colors.reset}) y sincronizar manifiestos`);
+    console.log(`  ${colors.cyan}[2]${colors.reset}  Subir versión ${colors.bright}MINOR${colors.reset}  (${actual} → ${colors.yellow}${minorNext}${colors.reset}) y sincronizar manifiestos`);
+    console.log(`  ${colors.cyan}[3]${colors.reset}  Subir versión ${colors.bright}MAJOR${colors.reset}  (${actual} → ${colors.yellow}${majorNext}${colors.reset}) y sincronizar manifiestos`);
     console.log(`  ${colors.cyan}[4]${colors.reset}  Ingresar versión personalizada manual`);
     console.log(`  ${colors.cyan}[5]${colors.reset}  ${colors.bright}Generar archivos en dist${colors.reset} (dist/ y dist-web/)`);
-    console.log(`  ${colors.cyan}[6]${colors.reset}  ${colors.bright}${colors.green}GENERAR INSTALABLES de Windows (.exe Setup / .msi / Portable / Hashes)${colors.reset}`);
+    console.log(`  ${colors.cyan}[6]${colors.reset}  ${colors.bright}${colors.green}GENERAR TODOS LOS INSTALABLES Y EL PORTABLE EN "instalables/"${colors.reset}`);
     console.log(`  ${colors.cyan}[7]${colors.reset}  ${colors.bright}Control de cambios Git${colors.reset}: git add, git commit y git push`);
     console.log(`  ${colors.cyan}[8]${colors.reset}  ${colors.bright}${colors.yellow}PIPELINE COMPLETO TODO-EN-UNO${colors.reset} (Bump + Tests + Dist + Instalables + Git)`);
     console.log(`  ${colors.cyan}[9]${colors.reset}  Ejecutar batería de 13 pruebas unitarias forenses`);
@@ -799,11 +836,11 @@ export async function iniciarModoInteractivo(): Promise<void> {
           break;
         }
         case '6': {
-          logHeader(`GENERANDO INSTALABLES PARA WINDOWS (VERSIÓN ${actual})`);
+          logHeader(`GENERANDO TODOS LOS INSTALABLES Y EL PORTABLE EN instalables/ (v${actual})`);
           const artefactos = await compilarEjecutables({ compilarInstaladores: true, compilarStandalone: true });
           const carpeta = mostrarReporteInstalables(actual, artefactos);
 
-          const abrir = (await preguntar(`¿Deseas abrir la carpeta de los instalables en el Explorador de Windows? (s/n) [s]: `)).trim().toLowerCase();
+          const abrir = (await preguntar(`¿Deseas abrir la carpeta "instalables" en el Explorador de Windows? (s/n) [s]: `)).trim().toLowerCase();
           if (abrir !== 'n' && abrir !== 'no') {
             abrirCarpetaEnExplorador(carpeta);
           }
@@ -834,12 +871,12 @@ export async function iniciarModoInteractivo(): Promise<void> {
             break;
           }
 
-          // 2. Sincronizar versión
+          // 2. Sincronizar versión si hubo bump
           if (tipo !== 'mantener') {
             sincronizarVersionEnArchivos(verFinal);
           }
 
-          // 3. Compilar frontend y ejecutables
+          // 3. Compilar frontend e instalables en instalables/
           const artefactos = await compilarEjecutables({ compilarInstaladores: true, compilarStandalone: true });
 
           // 4. Reporte detallado de dónde se generaron los instalables
@@ -852,7 +889,7 @@ export async function iniciarModoInteractivo(): Promise<void> {
           }
 
           // 6. Preguntar abrir carpeta
-          const abrir = (await preguntar(`¿Deseas abrir la carpeta de instalables en el Explorador de Windows? (s/n) [s]: `)).trim().toLowerCase();
+          const abrir = (await preguntar(`¿Deseas abrir la carpeta "instalables" en el Explorador de Windows? (s/n) [s]: `)).trim().toLowerCase();
           if (abrir !== 'n' && abrir !== 'no') {
             abrirCarpetaEnExplorador(carpeta);
           }
@@ -904,20 +941,20 @@ ${colors.cyan}Opciones:${colors.reset}
   --major              Incrementa la versión MAJOR (ej. 1.5.1 -> 2.0.0)
   --version <v>        Establece una versión específica (ej. 1.6.0)
   --dist-only          Compila únicamente el frontend web en dist/ y dist-web/
-  --installers-only    Compila instaladores y ejecutables mostrando su ubicación
-  --build              Compila frontend e instaladores tras el incremento
+  --installers-only    Compila instaladores y portable en instalables/ reportando ubicación
+  --build              Compila frontend e instaladores en instalables/ tras el incremento
   --quick              Compila solo el binario standalone sin paquetes NSIS/MSI
   --git, --push        Ejecuta git add, commit y git push
   --skip-tests         Omite las 13 pruebas unitarias forenses
   --test-only          Ejecuta únicamente la batería de pruebas unitarias
   --check              Verifica la salud del entorno (Node, Cargo, Tauri, Git, Python)
-  --open               Abre la carpeta de instalables en el explorador de Windows
+  --open               Abre la carpeta instalables/ en el explorador de Windows
   --help, -h           Muestra este mensaje de ayuda
 
 ${colors.cyan}Ejemplos:${colors.reset}
   npx tsx release.ts                      # Abre el menú interactivo guiado
   npx tsx release.ts --dist-only          # Compila y genera los archivos en dist/
-  npx tsx release.ts --installers-only    # Compila instaladores y reporta su ubicación
+  npx tsx release.ts --installers-only    # Compila instaladores en instalables/ y reporta
   npx tsx release.ts --patch --build --git# Pipeline automático completo
 `);
     return;
