@@ -453,7 +453,7 @@ export default function StreamlinedTranscriptionView(): React.ReactElement {
           <span style={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.08em', color: '#94A3B8' }}>
             ⚡ Interfaz Gráfica Alternativa (Pluggable DI)
           </span>
-          <h2 style={{ margin: '0.2rem 0 0 0', fontSize: '1.25rem', fontWeight: 600 }}>
+          <h2 style={{ margin: '0.2rem 0 0 0', fontSize: '1.25rem', fontWeight: 600, color: '#F8FAFC' }}>
             Modo Rápido & Diarización Directa
           </h2>
         </div>
@@ -743,7 +743,9 @@ export default function StreamlinedTranscriptionView(): React.ReactElement {
                     onClick={() => setArchivos((prev) => prev.filter((_, i) => i !== idx))}
                     disabled={enEjecucion}
                     title="Quitar este archivo de la cola"
-                    style={{ background: 'none', border: 'none', color: '#94A3B8', cursor: 'pointer', fontSize: '0.8rem', padding: '0 0.35rem' }}
+                    style={{ background: 'none', border: 'none', color: THEME_TOKENS.colors.textSecondary, cursor: 'pointer', fontSize: '0.8rem', padding: '0 0.35rem', transition: 'color 0.15s ease' }}
+                    onMouseEnter={(e) => { e.currentTarget.style.color = '#EF4444'; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.color = THEME_TOKENS.colors.textSecondary; }}
                   >
                     ✕
                   </button>
@@ -848,15 +850,15 @@ export default function StreamlinedTranscriptionView(): React.ReactElement {
           onClick={handleIniciar}
           disabled={enEjecucion || archivos.length === 0}
           style={{
-            backgroundColor: enEjecucion ? '#94A3B8' : '#0F172A',
-            color: '#FFFFFF',
+            backgroundColor: enEjecucion || archivos.length === 0 ? THEME_TOKENS.colors.bgSecondary : '#0F172A',
+            color: enEjecucion || archivos.length === 0 ? THEME_TOKENS.colors.textMuted : '#FFFFFF',
+            border: `1px solid ${enEjecucion || archivos.length === 0 ? THEME_TOKENS.colors.borderStrong : '#0F172A'}`,
             padding: '0.75rem 2.5rem',
             borderRadius: THEME_TOKENS.radii.sm,
             fontSize: '0.95rem',
             fontWeight: 700,
-            border: 'none',
             cursor: enEjecucion || archivos.length === 0 ? 'not-allowed' : 'pointer',
-            boxShadow: THEME_TOKENS.shadows.md,
+            boxShadow: enEjecucion || archivos.length === 0 ? 'none' : THEME_TOKENS.shadows.md,
             transition: 'all 0.15s ease',
           }}
         >
@@ -930,6 +932,7 @@ export default function StreamlinedTranscriptionView(): React.ReactElement {
                         borderRadius: THEME_TOKENS.radii.xs,
                         border: `1px solid ${THEME_TOKENS.colors.borderStrong}`,
                         backgroundColor: THEME_TOKENS.colors.surfaceBase,
+                        color: THEME_TOKENS.colors.textPrimary,
                         cursor: 'pointer',
                       }}
                     >
@@ -945,6 +948,7 @@ export default function StreamlinedTranscriptionView(): React.ReactElement {
                         borderRadius: THEME_TOKENS.radii.xs,
                         border: `1px solid ${THEME_TOKENS.colors.borderStrong}`,
                         backgroundColor: THEME_TOKENS.colors.surfaceBase,
+                        color: THEME_TOKENS.colors.textPrimary,
                         cursor: 'pointer',
                       }}
                     >

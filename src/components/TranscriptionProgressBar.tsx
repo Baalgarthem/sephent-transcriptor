@@ -287,7 +287,7 @@ export const TranscriptionProgressBar: React.FC<TranscriptionProgressBarProps> =
     <div
       style={{
         backgroundColor: THEME_TOKENS.colors.surfaceBase,
-        border: `1px solid ${esCompletado ? 'rgba(16,185,129,0.45)' : THEME_TOKENS.colors.borderDark}`,
+        border: `1px solid ${esCompletado ? 'rgba(16,185,129,0.45)' : THEME_TOKENS.colors.borderSubtle}`,
         borderRadius: THEME_TOKENS.radii.md,
         padding: '1.25rem 1.5rem',
         boxShadow: esCompletado
@@ -336,20 +336,20 @@ export const TranscriptionProgressBar: React.FC<TranscriptionProgressBarProps> =
             const completada = etapa.numero < etapaActual || esCompletado;
             const activa = etapa.numero === etapaActual && !esCompletado;
 
-            let bgPill: string = 'rgba(255, 255, 255, 0.04)';
-            let borderPill: string = 'rgba(255, 255, 255, 0.1)';
-            let textPill: string = THEME_TOKENS.colors.textMuted;
+            let bgPill: string = THEME_TOKENS.colors.bgSecondary;
+            let borderPill: string = THEME_TOKENS.colors.borderSubtle;
+            let textPill: string = THEME_TOKENS.colors.textSecondary;
             let icono: string = '○';
 
             if (completada) {
-              bgPill = 'rgba(16, 185, 129, 0.12)';
-              borderPill = 'rgba(16, 185, 129, 0.35)';
-              textPill = '#10b981';
+              bgPill = '#ECFDF5';
+              borderPill = '#A7F3D0';
+              textPill = '#065F46';
               icono = '✓';
             } else if (activa) {
-              bgPill = 'rgba(37, 99, 235, 0.15)';
-              borderPill = 'rgba(37, 99, 235, 0.5)';
-              textPill = '#3b82f6';
+              bgPill = '#EFF6FF';
+              borderPill = '#BFDBFE';
+              textPill = '#1D4ED8';
               icono = '●';
             }
 
@@ -433,9 +433,9 @@ export const TranscriptionProgressBar: React.FC<TranscriptionProgressBarProps> =
                 style={{
                   fontSize: '0.685rem',
                   fontWeight: 700,
-                  backgroundColor: 'rgba(37, 99, 235, 0.12)',
-                  color: '#2563eb',
-                  border: '1px solid rgba(37, 99, 235, 0.3)',
+                  backgroundColor: 'rgba(37, 99, 235, 0.08)',
+                  color: '#1D4ED8',
+                  border: '1px solid rgba(37, 99, 235, 0.25)',
                   padding: '0.1rem 0.45rem',
                   borderRadius: THEME_TOKENS.radii.pill,
                   display: 'inline-flex',
@@ -570,8 +570,8 @@ export const TranscriptionProgressBar: React.FC<TranscriptionProgressBarProps> =
         style={{
           backgroundColor: esRescateEnProgreso
             ? 'rgba(245, 158, 11, 0.08)'
-            : 'rgba(255, 255, 255, 0.03)',
-          border: `1px solid ${esRescateEnProgreso ? 'rgba(245, 158, 11, 0.35)' : 'rgba(255, 255, 255, 0.1)'}`,
+            : THEME_TOKENS.colors.bgSecondary,
+          border: `1px solid ${esRescateEnProgreso ? 'rgba(245, 158, 11, 0.35)' : THEME_TOKENS.colors.borderSubtle}`,
           borderRadius: THEME_TOKENS.radii.sm,
           padding: '0.75rem 1rem',
           marginBottom: '1rem',
@@ -587,7 +587,7 @@ export const TranscriptionProgressBar: React.FC<TranscriptionProgressBarProps> =
                 fontSize: '0.8rem',
                 textTransform: 'uppercase',
                 letterSpacing: '0.05em',
-                color: esRescateEnProgreso ? '#d97706' : '#94A3B8',
+                color: esRescateEnProgreso ? '#B45309' : THEME_TOKENS.colors.textSecondary,
               }}
             >
               {esRescateEnProgreso
@@ -614,9 +614,9 @@ export const TranscriptionProgressBar: React.FC<TranscriptionProgressBarProps> =
             margin: 0,
             fontSize: '0.85rem',
             color: esCompletado
-              ? '#059669'
+              ? '#047857'
               : esRescateEnProgreso
-              ? '#b45309'
+              ? '#92400E'
               : THEME_TOKENS.colors.textPrimary,
             fontWeight: esCompletado || esRescateEnProgreso ? 600 : 500,
             lineHeight: 1.45,
@@ -735,7 +735,7 @@ const MetricCard: React.FC<{
     <span
       style={{
         fontSize: '0.6875rem',
-        color: THEME_TOKENS.colors.textMuted,
+        color: THEME_TOKENS.colors.textSecondary,
         display: 'block',
         textTransform: 'uppercase',
         letterSpacing: '0.04em',
@@ -749,7 +749,7 @@ const MetricCard: React.FC<{
       style={{
         fontSize: '0.925rem',
         fontFamily: mono ? THEME_TOKENS.fonts.mono : THEME_TOKENS.fonts.sans,
-        color: highlight ? '#2563eb' : THEME_TOKENS.colors.textPrimary,
+        color: highlight ? '#1D4ED8' : THEME_TOKENS.colors.textPrimary,
         display: 'block',
         lineHeight: 1.2,
       }}

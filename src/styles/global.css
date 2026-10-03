@@ -29,6 +29,18 @@ h1, h2, h3, h4, .font-serif {
   font-weight: 600;
 }
 
+/* Salvaguarda de alto contraste: en cabeceras o contenedores oscuros, los encabezados usan texto claro */
+.modal-header h1, .modal-header h2, .modal-header h3, .modal-header h4,
+[data-theme="dark"] h1, [data-theme="dark"] h2, [data-theme="dark"] h3, [data-theme="dark"] h4,
+.dark-container h1, .dark-container h2, .dark-container h3, .dark-container h4 {
+  color: var(--color-text-on-dark);
+}
+
+/* Normalización de controles de formulario para evitar interferencias de modo oscuro del sistema operativo */
+input, select, textarea {
+  color: var(--color-text-primary);
+}
+
 /* Tipografía de código / hashes / rutas */
 code, pre, .font-mono {
   font-family: var(--font-mono);

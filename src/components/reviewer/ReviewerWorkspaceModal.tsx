@@ -838,6 +838,7 @@ export const ReviewerWorkspaceModal: React.FC<ReviewerWorkspaceModalProps> = ({
                     fontSize: '1.05rem',
                     fontFamily: THEME_TOKENS.fonts.serif,
                     letterSpacing: '0.02em',
+                    color: THEME_TOKENS.colors.textOnDark,
                   }}
                 >
                   Revisión e Identificación de Hablantes y Validación Forense

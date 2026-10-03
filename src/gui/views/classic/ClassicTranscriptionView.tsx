@@ -1130,6 +1130,7 @@ export default function ClassicTranscriptionView(): React.ReactElement {
                   fontSize: '0.8125rem',
                   fontWeight: 500,
                   backgroundColor: mostrarHistorialBD ? 'rgba(59, 130, 246, 0.1)' : THEME_TOKENS.colors.bgSecondary,
+                  color: mostrarHistorialBD ? '#1D4ED8' : THEME_TOKENS.colors.textPrimary,
                   border: `1px solid ${mostrarHistorialBD ? '#2563eb' : THEME_TOKENS.colors.borderSubtle}`,
                   borderRadius: THEME_TOKENS.radii.sm,
                   cursor: 'pointer',
@@ -1382,13 +1383,13 @@ export default function ClassicTranscriptionView(): React.ReactElement {
               disabled={isRunning || files.length === 0}
               className="btn-start-primary"
               style={{
-                backgroundColor: isRunning
-                  ? THEME_TOKENS.colors.borderStrong
-                  : files.length === 0
-                  ? THEME_TOKENS.colors.borderStrong
+                backgroundColor: isRunning || files.length === 0
+                  ? THEME_TOKENS.colors.bgSecondary
                   : THEME_TOKENS.colors.accentPrimary,
-                color: THEME_TOKENS.colors.textOnDark,
-                border: `1px solid ${THEME_TOKENS.colors.borderDark}`,
+                color: isRunning || files.length === 0
+                  ? THEME_TOKENS.colors.textMuted
+                  : THEME_TOKENS.colors.textOnDark,
+                border: `1px solid ${isRunning || files.length === 0 ? THEME_TOKENS.colors.borderStrong : THEME_TOKENS.colors.borderDark}`,
                 boxShadow: files.length > 0 && !isRunning ? THEME_TOKENS.shadows.md : 'none',
                 cursor: isRunning || files.length === 0 ? 'not-allowed' : 'pointer',
               }}

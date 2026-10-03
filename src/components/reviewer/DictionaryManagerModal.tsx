@@ -134,7 +134,7 @@ export const DictionaryManagerModal: React.FC<DictionaryManagerModalProps> = ({
           }}
         >
           <div>
-            <h3 style={{ margin: 0, fontSize: '1.1rem', fontFamily: THEME_TOKENS.fonts.serif }}>
+            <h3 style={{ margin: 0, fontSize: '1.1rem', fontFamily: THEME_TOKENS.fonts.serif, color: THEME_TOKENS.colors.textOnDark }}>
               📖 Diccionario Especializado y Extensible
             </h3>
             <span style={{ fontSize: '0.75rem', color: THEME_TOKENS.colors.textOnDarkMuted }}>

@@ -42,24 +42,24 @@ export const GUISwitcher: React.FC = () => {
           display: 'flex',
           alignItems: 'center',
           gap: '0.5rem',
-          backgroundColor: 'rgba(255, 255, 255, 0.08)',
-          border: '1px solid rgba(255, 255, 255, 0.2)',
-          color: '#F5F5F0',
+          backgroundColor: THEME_TOKENS.colors.surfaceBase,
+          border: `1px solid ${THEME_TOKENS.colors.borderStrong}`,
+          color: THEME_TOKENS.colors.textPrimary,
           padding: '0.35rem 0.75rem',
           borderRadius: THEME_TOKENS.radii.pill,
           fontSize: '0.785rem',
-          fontWeight: 500,
+          fontWeight: 600,
           cursor: 'pointer',
           transition: 'all 0.15s ease',
-          backdropFilter: 'blur(4px)',
+          boxShadow: THEME_TOKENS.shadows.sm,
         }}
         onMouseEnter={(e) => {
-          e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.15)';
-          e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.4)';
+          e.currentTarget.style.backgroundColor = THEME_TOKENS.colors.bgSecondary;
+          e.currentTarget.style.borderColor = THEME_TOKENS.colors.borderFocus;
         }}
         onMouseLeave={(e) => {
-          e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.08)';
-          e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.2)';
+          e.currentTarget.style.backgroundColor = THEME_TOKENS.colors.surfaceBase;
+          e.currentTarget.style.borderColor = THEME_TOKENS.colors.borderStrong;
         }}
         title="Cambiar entre diferentes tecnologías o diseños de interfaz gráfica"
       >
@@ -68,15 +68,17 @@ export const GUISwitcher: React.FC = () => {
         <span
           style={{
             fontSize: '0.675rem',
-            backgroundColor: 'rgba(255, 255, 255, 0.18)',
+            backgroundColor: THEME_TOKENS.colors.bgSecondary,
+            border: `1px solid ${THEME_TOKENS.colors.borderSubtle}`,
             padding: '0.1rem 0.4rem',
             borderRadius: THEME_TOKENS.radii.xs,
-            color: '#E2E8F0',
+            color: THEME_TOKENS.colors.textSecondary,
+            fontWeight: 600,
           }}
         >
           {interfazActiva.badge || interfazActiva.technology}
         </span>
-        <span style={{ fontSize: '0.65rem', marginLeft: '0.2rem', opacity: 0.75 }}>
+        <span style={{ fontSize: '0.65rem', marginLeft: '0.2rem', color: THEME_TOKENS.colors.textMuted }}>
           {menuAbierto ? '▲' : '▼'}
         </span>
       </button>
@@ -89,8 +91,8 @@ export const GUISwitcher: React.FC = () => {
             top: 'calc(100% + 6px)',
             right: 0,
             width: '280px',
-            backgroundColor: '#1E1E1C',
-            border: '1px solid rgba(255, 255, 255, 0.15)',
+            backgroundColor: THEME_TOKENS.colors.surfaceElevated,
+            border: `1px solid ${THEME_TOKENS.colors.borderStrong}`,
             borderRadius: THEME_TOKENS.radii.md,
             padding: '0.5rem',
             boxShadow: THEME_TOKENS.shadows.lg,
@@ -101,11 +103,11 @@ export const GUISwitcher: React.FC = () => {
           <div
             style={{
               padding: '0.35rem 0.5rem 0.5rem',
-              borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+              borderBottom: `1px solid ${THEME_TOKENS.colors.borderSubtle}`,
               marginBottom: '0.35rem',
             }}
           >
-            <strong style={{ fontSize: '0.75rem', color: '#94A3B8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            <strong style={{ fontSize: '0.75rem', color: THEME_TOKENS.colors.textSecondary, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
               Interfaces Gráficas (DI)
             </strong>
           </div>
@@ -119,16 +121,17 @@ export const GUISwitcher: React.FC = () => {
                 style={{
                   padding: '0.6rem 0.75rem',
                   borderRadius: THEME_TOKENS.radii.sm,
-                  backgroundColor: esActiva ? 'rgba(255, 255, 255, 0.1)' : 'transparent',
+                  backgroundColor: esActiva ? THEME_TOKENS.colors.bgSecondary : 'transparent',
+                  border: `1px solid ${esActiva ? THEME_TOKENS.colors.borderStrong : 'transparent'}`,
                   cursor: 'pointer',
                   marginBottom: '0.25rem',
-                  transition: 'background-color 0.15s',
+                  transition: 'background-color 0.15s ease',
                   display: 'flex',
                   flexDirection: 'column',
                   gap: '0.2rem',
                 }}
                 onMouseEnter={(e) => {
-                  if (!esActiva) e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.05)';
+                  if (!esActiva) e.currentTarget.style.backgroundColor = THEME_TOKENS.colors.bgSecondary;
                 }}
                 onMouseLeave={(e) => {
                   if (!esActiva) e.currentTarget.style.backgroundColor = 'transparent';
@@ -137,21 +140,22 @@ export const GUISwitcher: React.FC = () => {
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
                     <span>{desc.icon || '🖥️'}</span>
-                    <strong style={{ fontSize: '0.825rem', color: '#F1F5F9' }}>{desc.name}</strong>
+                    <strong style={{ fontSize: '0.825rem', color: THEME_TOKENS.colors.textPrimary }}>{desc.name}</strong>
                   </div>
                   {esActiva && (
-                    <span style={{ fontSize: '0.75rem', color: '#4ADE80', fontWeight: 700 }}>✓</span>
+                    <span style={{ fontSize: '0.75rem', color: THEME_TOKENS.colors.stateSuccess, fontWeight: 700 }}>✓</span>
                   )}
                 </div>
-                <span style={{ fontSize: '0.725rem', color: '#94A3B8' }}>{desc.description}</span>
+                <span style={{ fontSize: '0.725rem', color: THEME_TOKENS.colors.textSecondary }}>{desc.description}</span>
                 <div style={{ marginTop: '0.2rem' }}>
                   <span
                     style={{
                       fontSize: '0.65rem',
-                      backgroundColor: 'rgba(255, 255, 255, 0.08)',
+                      backgroundColor: THEME_TOKENS.colors.bgCanvas,
+                      border: `1px solid ${THEME_TOKENS.colors.borderSubtle}`,
                       padding: '0.1rem 0.35rem',
                       borderRadius: THEME_TOKENS.radii.xs,
-                      color: '#CBD5E1',
+                      color: THEME_TOKENS.colors.textSecondary,
                     }}
                   >
                     Tecnología: {desc.technology}
