@@ -79,11 +79,25 @@ export class WhisperBridgeService {
     let unlisten: (() => void) | undefined = undefined;
 
     if (tauri.event?.listen) {
+      let maxPctVisto = 0;
+      let maxAudioSecVisto = 0;
+      let maxEtapaVista = 1;
+
       try {
         unlisten = await tauri.event.listen('transcripcion-progreso', (event: any) => {
           const payload = event.payload;
           if (payload && onProgreso) {
-            const pct = typeof payload.porcentaje === 'number' ? payload.porcentaje : 50;
+            const pctRaw = typeof payload.porcentaje === 'number' ? payload.porcentaje : maxPctVisto;
+            maxPctVisto = Math.max(maxPctVisto, pctRaw);
+
+            if (typeof payload.segundosProcesadosAudio === 'number') {
+              maxAudioSecVisto = Math.max(maxAudioSecVisto, payload.segundosProcesadosAudio);
+            }
+
+            if (typeof payload.etapaActual === 'number') {
+              maxEtapaVista = Math.max(maxEtapaVista, payload.etapaActual);
+            }
+
             const msg = payload.mensaje || 'Procesando con Whisper...';
 
             // Extraer todos los campos de telemetría que Rust emite para la barra de progreso
@@ -94,14 +108,13 @@ export class WhisperBridgeService {
               velocidadFactor: typeof payload.velocidadFactor === 'number'
                 ? payload.velocidadFactor
                 : undefined,
-              etapaActual: typeof payload.etapaActual === 'number'
-                ? payload.etapaActual
-                : undefined,
+              etapaActual: maxEtapaVista,
               totalEtapas: typeof payload.totalEtapas === 'number'
                 ? payload.totalEtapas
                 : undefined,
-              segundosProcesadosAudio: typeof payload.segundosProcesadosAudio === 'number'
-                ? payload.segundosProcesadosAudio
+              segundosProcesadosAudio: maxAudioSecVisto > 0 ? maxAudioSecVisto : undefined,
+              totalSegundosAudio: typeof payload.totalSegundosAudio === 'number'
+                ? payload.totalSegundosAudio
                 : undefined,
               accionActual: typeof payload.accionActual === 'string'
                 ? payload.accionActual
@@ -112,7 +125,7 @@ export class WhisperBridgeService {
               detalle: typeof payload.detalle === 'string' ? payload.detalle : undefined,
             };
 
-            onProgreso(pct, msg, extra);
+            onProgreso(maxPctVisto, msg, extra);
           }
         });
       } catch (e) {

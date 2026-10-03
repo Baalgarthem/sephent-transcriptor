@@ -23,28 +23,40 @@ export class TranscriptionEngineAdapter implements ITranscriptionEngine {
     const totalEtapas = opciones.diarizar ? 4 : 3;
     const inicioMs = Date.now();
 
+    let maxPctVisto = 0;
+    let maxAudioProcVisto = 0;
+    let maxEtapaVista = 1;
+
     const onProgresoInterno = (porcentaje: number, mensaje: string, extra?: any) => {
       if (opciones.onProgreso) {
+        maxPctVisto = Math.max(maxPctVisto, Math.min(100, Math.max(0, porcentaje)));
+        if (typeof extra?.segundosProcesadosAudio === 'number') {
+          maxAudioProcVisto = Math.max(maxAudioProcVisto, extra.segundosProcesadosAudio);
+        }
+        if (typeof extra?.etapaActual === 'number') {
+          maxEtapaVista = Math.max(maxEtapaVista, extra.etapaActual);
+        }
+
         const transcurrido = Math.max(0.1, (Date.now() - inicioMs) / 1000);
 
-        // Etapa actual: preferir la del engine (Rust), si no, inferir por porcentaje
-        let etapa = extra?.etapaActual;
+        // Etapa actual: preferir la del engine acumulada, si no, inferir por porcentaje
+        let etapa = maxEtapaVista;
         if (!etapa || typeof etapa !== 'number') {
-          if (porcentaje < 20) etapa = 1;
-          else if (porcentaje < 70) etapa = 2;
-          else if (porcentaje < 90) etapa = 3;
+          if (maxPctVisto < 20) etapa = 1;
+          else if (maxPctVisto < 70) etapa = 2;
+          else if (maxPctVisto < 90) etapa = 3;
           else etapa = 4;
         }
+
+        const totalAudio = (extra?.totalSegundosAudio && extra.totalSegundosAudio > 0)
+          ? extra.totalSegundosAudio
+          : ((archivo as any).durationSeconds || null);
 
         // ETA: preferir la del engine (Rust/Python), si no, calcular con estimación adaptativa dual
         let eta = extra?.tiempoEstimadoSegundos;
         if (eta === undefined || eta === null || !isFinite(eta) || eta <= 0) {
-          const totalAudio = (extra?.totalSegundosAudio && extra.totalSegundosAudio > 0)
-            ? extra.totalSegundosAudio
-            : ((archivo as any).durationSeconds || null);
-
-          if (porcentaje > 3 && porcentaje < 99) {
-            const frac = porcentaje / 100;
+          if (maxPctVisto > 3 && maxPctVisto < 99) {
+            const frac = maxPctVisto / 100;
             const etaLineal = Math.max(1, (transcurrido / frac) - transcurrido);
 
             if (totalAudio) {
@@ -52,12 +64,12 @@ export class TranscriptionEngineAdapter implements ITranscriptionEngine {
               const totalEsperado = Math.max(6, totalAudio * overheadDiarizar + 4);
               const etaPrior = Math.max(2, totalEsperado - transcurrido);
               // Ponderación suave: da más certidumbre a la extrapolación conforme avanza el porcentaje
-              const pesoLineal = Math.min(1.0, Math.max(0.15, (porcentaje - 5) / 25));
+              const pesoLineal = Math.min(1.0, Math.max(0.15, (maxPctVisto - 5) / 25));
               eta = pesoLineal * etaLineal + (1 - pesoLineal) * etaPrior;
             } else {
               eta = etaLineal;
             }
-          } else if (totalAudio && porcentaje <= 3) {
+          } else if (totalAudio && maxPctVisto <= 3) {
             const overheadDiarizar = opciones.diarizar ? 0.35 : 0.22;
             const totalEsperado = Math.max(6, totalAudio * overheadDiarizar + 4);
             eta = Math.max(3, totalEsperado - transcurrido);
@@ -66,8 +78,13 @@ export class TranscriptionEngineAdapter implements ITranscriptionEngine {
           }
         }
 
+        let finalAudioProc = maxAudioProcVisto > 0 ? maxAudioProcVisto : extra?.segundosProcesadosAudio;
+        if (maxPctVisto >= 100 && totalAudio && totalAudio > 0) {
+          finalAudioProc = totalAudio;
+        }
+
         const telemetria: TelemetriaTranscripcion = {
-          porcentaje,
+          porcentaje: maxPctVisto,
           etapaActual: etapa,
           totalEtapas: extra?.totalEtapas || totalEtapas,
           mensaje,
@@ -76,8 +93,8 @@ export class TranscriptionEngineAdapter implements ITranscriptionEngine {
           velocidadFactor: (extra?.velocidadFactor && extra.velocidadFactor > 0)
             ? extra.velocidadFactor
             : 1.0,
-          segundosProcesadosAudio: extra?.segundosProcesadosAudio,
-          totalSegundosAudio: extra?.totalSegundosAudio,
+          segundosProcesadosAudio: finalAudioProc,
+          totalSegundosAudio: totalAudio || extra?.totalSegundosAudio,
           accionActual: extra?.accionActual,
           nombreEtapa: extra?.nombreEtapa,
           evitarTruncamiento: opciones.evitarTruncamiento,

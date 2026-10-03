@@ -1682,6 +1682,11 @@ async fn transcribir_audio_whisper(
         let modelo_clone = modelo_norm.clone();
         std::thread::spawn(move || {
             let reader = BufReader::new(stderr);
+            let mut max_pct: f64 = 0.0;
+            let mut max_proc_sec: f64 = 0.0;
+            let mut max_stage: usize = 1;
+            let mut ultimo_total_sec: Option<f64> = None;
+
             for l in reader.lines().map_while(Result::ok) {
                 let trimmed = l.trim();
                 if !trimmed.is_empty() {
@@ -1695,14 +1700,25 @@ async fn transcribir_audio_whisper(
                     if trimmed.starts_with("[whisper_progress]") {
                         let json_part = trimmed.trim_start_matches("[whisper_progress]").trim();
                         if let Ok(v) = serde_json::from_str::<serde_json::Value>(json_part) {
-                            let pct = v.get("pct").and_then(|x| x.as_f64()).unwrap_or(45.0);
+                            let pct_raw = v.get("pct").and_then(|x| x.as_f64()).unwrap_or(45.0);
+                            max_pct = f64::max(max_pct, pct_raw);
+                            let pct = max_pct;
+
                             let eta_sec = v.get("eta_sec").and_then(|x| x.as_f64()).map(|s| s as u64);
                             let speed = v.get("speed").and_then(|x| x.as_f64()).unwrap_or(1.0);
-                            let stage = v.get("stage").and_then(|x| x.as_u64()).unwrap_or(2) as usize;
-                            let proc_sec = v.get("processed_sec").and_then(|x| x.as_f64());
-                            let tot_sec = v.get("total_sec").and_then(|x| x.as_f64());
-                            let msg = v.get("msg").and_then(|x| x.as_str()).unwrap_or("Decodificando audio con Whisper...").to_string();
+                            let stage_raw = v.get("stage").and_then(|x| x.as_u64()).unwrap_or(2) as usize;
+                            max_stage = usize::max(max_stage, stage_raw);
 
+                            if let Some(ps) = v.get("processed_sec").and_then(|x| x.as_f64()) {
+                                max_proc_sec = f64::max(max_proc_sec, ps);
+                            }
+                            let proc_sec = if max_proc_sec > 0.0 { Some(max_proc_sec) } else { None };
+
+                            if let Some(ts) = v.get("total_sec").and_then(|x| x.as_f64()) {
+                                ultimo_total_sec = Some(ts);
+                            }
+
+                            let msg = v.get("msg").and_then(|x| x.as_str()).unwrap_or("Decodificando audio con Whisper...").to_string();
                             let action = v.get("action").and_then(|x| x.as_str());
                             let substage = v.get("substage").and_then(|x| x.as_str());
 
@@ -1711,10 +1727,10 @@ async fn transcribir_audio_whisper(
                                 "mensaje": msg,
                                 "tiempoEstimadoSegundos": eta_sec,
                                 "velocidadFactor": speed,
-                                "etapaActual": stage,
+                                "etapaActual": max_stage,
                                 "totalEtapas": total_etapas,
                                 "segundosProcesadosAudio": proc_sec,
-                                "totalSegundosAudio": tot_sec,
+                                "totalSegundosAudio": ultimo_total_sec,
                                 "accionActual": action,
                                 "nombreEtapa": substage,
                                 "detalle": trimmed
@@ -1723,8 +1739,8 @@ async fn transcribir_audio_whisper(
                         }
                     }
 
-                    let mut pct = 45;
-                    let mut etapa_num = 2;
+                    // Fallback para mensajes de texto: NUNCA regresar el porcentaje ni la etapa ni el audio procesado
+                    let mut etapa_num = max_stage;
                     let mut nombre_etapa = "Decodificación Acústica Fonética";
                     let mut accion_actual = format!("Decodificando señal acústica con Whisper ({})", modelo_clone);
                     let mut msg = if diarizar_activo {
@@ -1733,8 +1749,7 @@ async fn transcribir_audio_whisper(
                         format!("Etapa 2 de 3: Transcribiendo y decodificando audio con Whisper ({})...", modelo_clone)
                     };
 
-                    if trimmed.contains("ETAPA 1") || trimmed.contains("Cargando modelo") {
-                        pct = 15;
+                    let pct_fallback = if trimmed.contains("ETAPA 1") || trimmed.contains("Cargando modelo") {
                         etapa_num = 1;
                         nombre_etapa = "Carga de Tensores y Preparación";
                         let disp = if trimmed.contains("GPU NVIDIA") {
@@ -1750,31 +1765,40 @@ async fn transcribir_audio_whisper(
                         };
                         accion_actual = format!("Cargando pesos de {} en memoria ({}) y normalizando audio", modelo_clone, disp);
                         msg = format!("Etapa 1 de {}: Cargando modelo {} en {}...", total_etapas, modelo_clone, disp);
+                        15.0
                     } else if trimmed.contains("ETAPA 2") || trimmed.contains("Transcribiendo") {
-                        pct = if diarizar_activo { 45 } else { 55 };
                         etapa_num = 2;
                         nombre_etapa = "Decodificación Acústica Fonética";
                         accion_actual = "Extrayendo espectrogramas Mel e infiriendo fonemas continuos".to_string();
                         msg = format!("Etapa 2 de {}: Extrayendo espectrograma y decodificando audio con Whisper...", total_etapas);
+                        if diarizar_activo { 45.0 } else { 55.0 }
                     } else if diarizar_activo && (trimmed.contains("ETAPA 3") || trimmed.contains("Diarizando") || trimmed.contains("Segmentos:")) {
-                        pct = 75;
                         etapa_num = 3;
                         nombre_etapa = "Diarización de Locutores";
                         accion_actual = "Extrayendo perfiles de voz (x-vectors) y agrupando interlocutores".to_string();
                         msg = "Etapa 3 de 4: Diarizando voces y discriminando interlocutores...".to_string();
+                        75.0
                     } else if trimmed.contains("ETAPA 4") || trimmed.contains("ETAPA 3/3") || trimmed.contains("Sincronizando") || trimmed.contains("Estructurando") {
-                        pct = 92;
                         etapa_num = total_etapas;
                         nombre_etapa = "Estructuración Pericial y Sellado";
                         accion_actual = "Reconciliando marcas de tiempo, puliendo ortografía y generando actas".to_string();
                         msg = format!("Etapa {} de {}: Estructurando expediente y aplicando pulido ortográfico...", total_etapas, total_etapas);
-                    }
+                        92.0
+                    } else {
+                        max_pct
+                    };
+
+                    max_pct = f64::max(max_pct, pct_fallback);
+                    max_stage = usize::max(max_stage, etapa_num);
+                    let proc_sec = if max_proc_sec > 0.0 { Some(max_proc_sec) } else { None };
 
                     let _ = window_clone.emit("transcripcion-progreso", serde_json::json!({
-                        "porcentaje": pct,
+                        "porcentaje": max_pct,
                         "mensaje": msg,
-                        "etapaActual": etapa_num,
+                        "etapaActual": max_stage,
                         "totalEtapas": total_etapas,
+                        "segundosProcesadosAudio": proc_sec,
+                        "totalSegundosAudio": ultimo_total_sec,
                         "accionActual": accion_actual,
                         "nombreEtapa": nombre_etapa,
                         "detalle": trimmed

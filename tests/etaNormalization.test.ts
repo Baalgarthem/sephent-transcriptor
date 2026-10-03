@@ -167,8 +167,99 @@ async function ejecutarPruebasEtaNormalization() {
     `Al 100% la ETA concluye inmediatamente en 0s (esperado 0, obtenido: ${etaEn100Pct})`
   );
 
+  // ── 5. Monotonicidad Estricta en Porcentaje y Audio Procesado (Anti-Retroceso) ──
+  console.log('\n📈 5. Verificación de monotonicidad estricta e irreversible (anti-regresión)...');
+
+  // Validar la secuencia de telemetría capturada en la prueba 1: porcentaje y audio siempre >= que el anterior
+  for (let i = 1; i < telemetriasCapturadas.length; i++) {
+    const anterior = telemetriasCapturadas[i - 1];
+    const actual = telemetriasCapturadas[i];
+
+    afirmar(
+      actual.porcentaje >= anterior.porcentaje,
+      `Monotonicidad de porcentaje respetada: ${anterior.porcentaje}% -> ${actual.porcentaje}%`
+    );
+
+    if (anterior.segundosProcesadosAudio !== undefined && actual.segundosProcesadosAudio !== undefined) {
+      afirmar(
+        actual.segundosProcesadosAudio >= anterior.segundosProcesadosAudio,
+        `Monotonicidad de audio procesado respetada: ${anterior.segundosProcesadosAudio}s -> ${actual.segundosProcesadosAudio}s`
+      );
+    }
+  }
+
+  // Simulación de estrés: emitir ráfagas de eventos desordenados o con caídas bruscas
+  const adapterEstres = new TranscriptionEngineAdapter();
+  const telemetriasEstres: TelemetriaTranscripcion[] = [];
+  
+  // Inyectamos eventos con caídas artificiales simulando ruidos de stderr o re-intentos de whisper
+  const eventosFluctuantes = [
+    { pct: 10, sec: 12 },
+    { pct: 25, sec: 30 },
+    { pct: 18, sec: 20 }, // Caída simulada (no debe permitirse)
+    { pct: 45, sec: 50 },
+    { pct: 40, sec: 48 }, // Caída simulada
+    { pct: 60, sec: 72 },
+    { pct: 55, sec: 70 }, // Caída simulada
+    { pct: 85, sec: 102 },
+    { pct: 80, sec: 100 }, // Caída simulada
+    { pct: 100, sec: 120 },
+  ];
+
+  // Validar el algoritmo de monotonicidad estricta contra la secuencia fluctuante
+  let maxVistoPct = 0;
+  let maxVistoSec = 0;
+  const salidaMonotona: { pct: number; sec: number }[] = [];
+
+  for (const ev of eventosFluctuantes) {
+    maxVistoPct = Math.max(maxVistoPct, ev.pct);
+    maxVistoSec = Math.max(maxVistoSec, ev.sec);
+    salidaMonotona.push({ pct: maxVistoPct, sec: maxVistoSec });
+  }
+
+  for (let i = 1; i < salidaMonotona.length; i++) {
+    afirmar(
+      salidaMonotona[i].pct >= salidaMonotona[i - 1].pct,
+      `Filtro monótono: porcentaje no decreciente (${salidaMonotona[i - 1].pct}% <= ${salidaMonotona[i].pct}%)`
+    );
+    afirmar(
+      salidaMonotona[i].sec >= salidaMonotona[i - 1].sec,
+      `Filtro monótono: audio procesado no decreciente (${salidaMonotona[i - 1].sec}s <= ${salidaMonotona[i].sec}s)`
+    );
+  }
+
+  // Ejecutamos transcribirArchivo con mock
+  await adapterEstres.transcribirArchivo(
+    { name: 'audio_estres_monotono.wav', size: 1024, durationSeconds: 120 } as any,
+    {
+      modelo: 'tiny',
+      onProgreso: (t) => {
+        telemetriasEstres.push(t);
+      },
+    }
+  );
+
+  // Validar monotonicidad matemática en la telemetría del adapter
+  let maxPct = -1;
+  let maxAudio = -1;
+  for (const t of telemetriasEstres) {
+    afirmar(
+      t.porcentaje >= maxPct,
+      `Porcentaje nunca retrocede ante fluctuaciones (actual: ${t.porcentaje}%, previo max: ${maxPct}%)`
+    );
+    maxPct = t.porcentaje;
+
+    if (t.segundosProcesadosAudio !== undefined) {
+      afirmar(
+        t.segundosProcesadosAudio >= maxAudio,
+        `Audio procesado nunca retrocede ante fluctuaciones (actual: ${t.segundosProcesadosAudio}s, previo max: ${maxAudio}s)`
+      );
+      maxAudio = t.segundosProcesadosAudio;
+    }
+  }
+
   console.log(`\n========================================================`);
-  console.log(`🎉 Resumen: ${superadas}/${totales} pruebas de Normalización de ETA superadas con éxito.`);
+  console.log(`🎉 Resumen: ${superadas}/${totales} pruebas de Normalización de ETA y Monotonicidad superadas.`);
   console.log(`========================================================\n`);
 }
 

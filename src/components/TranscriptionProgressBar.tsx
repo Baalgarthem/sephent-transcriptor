@@ -158,13 +158,40 @@ export const TranscriptionProgressBar: React.FC<TranscriptionProgressBarProps> =
   const inicioRef = useRef<number>(Date.now());
   const [segundosTranscurridos, setSegundosTranscurridos] = useState<number>(0);
 
-  const porcentajeObjetivo = Math.min(100, Math.max(0, porcentaje));
+  // Monotonicidad estricta e irreversible para porcentaje y audio analizado
+  const maxPorcentajeRef = useRef<number>(0);
+  const maxAudioProcesadoRef = useRef<number>(0);
+  const ultimoNombreArchivoRef = useRef<string | undefined>(nombreArchivo);
+
+  // Al cambiar de archivo, reiniciar acumuladores de máximos de forma sincronizada
+  if (ultimoNombreArchivoRef.current !== nombreArchivo) {
+    ultimoNombreArchivoRef.current = nombreArchivo;
+    maxPorcentajeRef.current = 0;
+    maxAudioProcesadoRef.current = 0;
+  }
+
+  // El porcentaje bajo ninguna circunstancia puede regresar hacia atrás dentro de un archivo
+  const porcentajeMonotono = Math.max(
+    maxPorcentajeRef.current,
+    Math.min(100, Math.max(0, porcentaje))
+  );
+  maxPorcentajeRef.current = porcentajeMonotono;
+
+  const porcentajeObjetivo = porcentajeMonotono;
   const esCompletado = porcentajeObjetivo >= 100;
+
+  // El audio procesado acumulado bajo ninguna circunstancia puede decrecer
+  if (segundosProcesadosAudio !== undefined && segundosProcesadosAudio >= 0 && isFinite(segundosProcesadosAudio)) {
+    maxAudioProcesadoRef.current = Math.max(maxAudioProcesadoRef.current, segundosProcesadosAudio);
+  }
+  const audioProcesadoMostrado = (esCompletado && totalSegundosAudio && totalSegundosAudio > 0)
+    ? totalSegundosAudio
+    : maxAudioProcesadoRef.current;
 
   // Referencias para el modelo dinámico de estimación de tiempo (ETA continuo y adaptativo)
   const etaCalibradaRef = useRef<number>(0);
   const [etaMostrada, setEtaMostrada] = useState<number>(0);
-  const ultimoPuntoVelocidadRef = useRef<{ tiempo: number; pct: number }>({ tiempo: Date.now(), pct: porcentaje });
+  const ultimoPuntoVelocidadRef = useRef<{ tiempo: number; pct: number }>({ tiempo: Date.now(), pct: porcentajeMonotono });
   const velocidadEmaRef = useRef<number>(1.0); // % de avance por segundo observado
   const ultimaEtaBackendRef = useRef<number>(tiempoEstimadoSegundos);
   ultimaEtaBackendRef.current = tiempoEstimadoSegundos;
@@ -173,8 +200,12 @@ export const TranscriptionProgressBar: React.FC<TranscriptionProgressBarProps> =
   useEffect(() => {
     inicioRef.current = Date.now();
     setSegundosTranscurridos(0);
-    ultimoPuntoVelocidadRef.current = { tiempo: Date.now(), pct: porcentaje };
+    maxPorcentajeRef.current = 0;
+    maxAudioProcesadoRef.current = 0;
+    ultimoPuntoVelocidadRef.current = { tiempo: Date.now(), pct: 0 };
     velocidadEmaRef.current = 1.0;
+    setPorcentajeVisual(0);
+    pctVisualRef.current = 0;
 
     let priorInicial = 25;
     if (totalSegundosAudio && totalSegundosAudio > 0) {
@@ -212,14 +243,14 @@ export const TranscriptionProgressBar: React.FC<TranscriptionProgressBarProps> =
   useEffect(() => {
     const ahora = Date.now();
     const dt = (ahora - ultimoPuntoVelocidadRef.current.tiempo) / 1000;
-    const dp = porcentaje - ultimoPuntoVelocidadRef.current.pct;
+    const dp = porcentajeMonotono - ultimoPuntoVelocidadRef.current.pct;
 
     if (dt >= 0.4 && dp > 0) {
       const velInst = dp / dt;
       velocidadEmaRef.current = 0.70 * velocidadEmaRef.current + 0.30 * velInst;
-      ultimoPuntoVelocidadRef.current = { tiempo: ahora, pct: porcentaje };
+      ultimoPuntoVelocidadRef.current = { tiempo: ahora, pct: porcentajeMonotono };
     }
-  }, [porcentaje]);
+  }, [porcentajeMonotono]);
 
   // ── 2. Ticker de Reloj Real a 1 Hz y Normalización Dinámica de ETA en Vivo ──
   // Decrementa el tiempo restante segundo a segundo en vivo y mantiene la sincronía sin congelamientos
@@ -268,7 +299,7 @@ export const TranscriptionProgressBar: React.FC<TranscriptionProgressBarProps> =
   }, [esCompletado, porcentajeObjetivo]);
 
   // ── 3. Micro-interpolador en tiempo real para barra "en vivo" ──
-  // Permite que la barra avance de forma matemáticamente continua sin saltos bruscos
+  // Permite que la barra avance de forma matemáticamente continua sin saltos bruscos ni retrocesos
   const [porcentajeVisual, setPorcentajeVisual] = useState<number>(porcentajeObjetivo);
   const pctVisualRef = useRef<number>(porcentajeVisual);
   pctVisualRef.current = porcentajeVisual;
@@ -280,12 +311,14 @@ export const TranscriptionProgressBar: React.FC<TranscriptionProgressBarProps> =
       const actual = pctVisualRef.current;
       const diferencia = target - actual;
 
-      if (Math.abs(diferencia) > 0.05) {
+      // Monotonicidad estricta: solo avanza hacia adelante si la diferencia es positiva
+      // Bajo ninguna circunstancia reduce el porcentaje visual ni permite regresiones
+      if (diferencia > 0.04) {
         // Factor de amortiguación Lerp (0.12 para fluidez de alta fidelidad)
-        const nuevo = actual + diferencia * 0.12;
+        const nuevo = Math.min(target, actual + diferencia * 0.12);
         setPorcentajeVisual(nuevo);
         animId = requestAnimationFrame(actualizarFluido);
-      } else {
+      } else if (actual < target) {
         setPorcentajeVisual(target);
       }
     };
@@ -295,6 +328,7 @@ export const TranscriptionProgressBar: React.FC<TranscriptionProgressBarProps> =
   }, [porcentajeObjetivo]);
 
   // Micro-avance continuo durante la decodificación activa si el backend no emite evento
+  // IMPORTANTE: Nunca sobrepasa porcentajeObjetivo para garantizar monotonicidad absoluta
   useEffect(() => {
     if (porcentajeObjetivo >= 100 || porcentajeObjetivo <= 0 || etapaActual !== 2) {
       return;
@@ -302,9 +336,9 @@ export const TranscriptionProgressBar: React.FC<TranscriptionProgressBarProps> =
 
     const microTicker = setInterval(() => {
       setPorcentajeVisual((actual) => {
-        // Avanza un micro-paso de 0.04% cada 150ms hasta un máximo de 0.8% por encima del objetivo
-        if (actual < porcentajeObjetivo + 0.8 && actual < 98) {
-          return actual + 0.04;
+        // Solo avanza si el valor visual aún no ha alcanzado porcentajeObjetivo (suavizado sin overshoot)
+        if (actual < porcentajeObjetivo && actual < 99) {
+          return Math.min(porcentajeObjetivo, actual + 0.03);
         }
         return actual;
       });
@@ -342,15 +376,14 @@ export const TranscriptionProgressBar: React.FC<TranscriptionProgressBarProps> =
     return infoEtapaActual.accionPorDefecto;
   }, [esCompletado, accionActual, mensaje, infoEtapaActual]);
 
-  // Cálculo de cobertura de audio analizado
+  // Cálculo de cobertura de audio analizado (monótono irreversible)
   const hayAudioData =
     totalSegundosAudio !== undefined &&
     totalSegundosAudio > 0 &&
-    segundosProcesadosAudio !== undefined &&
-    segundosProcesadosAudio >= 0;
+    (segundosProcesadosAudio !== undefined || maxAudioProcesadoRef.current > 0);
 
   const pctAudioCobertura = hayAudioData
-    ? Math.min(100, Math.max(0, (segundosProcesadosAudio! / totalSegundosAudio!) * 100)).toFixed(1)
+    ? Math.min(100, Math.max(0, (audioProcesadoMostrado / totalSegundosAudio!) * 100)).toFixed(1)
     : null;
 
   const velocidadValida =
@@ -682,7 +715,7 @@ export const TranscriptionProgressBar: React.FC<TranscriptionProgressBarProps> =
                 fontFamily: THEME_TOKENS.fonts.mono,
               }}
             >
-              Audio: {formatearTiempo(segundosProcesadosAudio)} / {formatearTiempo(totalSegundosAudio)} ({pctAudioCobertura}%)
+              Audio: {formatearTiempo(audioProcesadoMostrado)} / {formatearTiempo(totalSegundosAudio)} ({pctAudioCobertura}%)
             </span>
           )}
         </div>
@@ -744,7 +777,7 @@ export const TranscriptionProgressBar: React.FC<TranscriptionProgressBarProps> =
         {hayAudioData && (
           <MetricCard
             label="Audio Analizado"
-            value={`${formatearTiempo(segundosProcesadosAudio || 0)}`}
+            value={`${formatearTiempo(audioProcesadoMostrado)}`}
             sublabel={`de ${formatearTiempo(totalSegundosAudio)}`}
             highlight={false}
             mono={true}

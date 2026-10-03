@@ -295,7 +295,7 @@ export class AudioTranscriptionEngine {
         lineas.push(`Detalle de Causa:     ${errorMotivo}`);
       }
       lineas.push(`Modelo Utilizado:     ${modelo}`);
-      lineas.push(`Idioma:               ${idioma.toUpperCase()}`);
+      lineas.push(`Idioma:               ${(idioma || 'auto').toUpperCase()}`);
       lineas.push(`Fecha de Proceso:     ${new Date().toLocaleString('es-ES')}`);
       lineas.push(`Hablantes Detectados: ${Object.values(safeSpeakerNames).join(', ')}`);
       lineas.push('Nota Pericial:        Se preservan con integridad forense todos los segmentos');
@@ -307,7 +307,7 @@ export class AudioTranscriptionEngine {
       lineas.push('================================================================================');
       lineas.push(`Documento de Origen:  ${nombreArchivo}`);
       lineas.push(`Modelo Utilizado:     ${modelo}`);
-      lineas.push(`Idioma:               ${idioma.toUpperCase()}`);
+      lineas.push(`Idioma:               ${(idioma || 'auto').toUpperCase()}`);
       lineas.push(`Fecha de Proceso:     ${new Date().toLocaleString('es-ES')}`);
       lineas.push(`Hablantes Detectados: ${Object.values(safeSpeakerNames).join(', ')}`);
       lineas.push('================================================================================\n');

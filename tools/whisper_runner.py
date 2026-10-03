@@ -1300,6 +1300,8 @@ def transcribir(file_path: str, model_name: str, language: str,
     progress_active = [True]
     progress_tracker_ref = [None]
     last_progress_emit = [0.0]
+    max_pct_emitted = [15.0]
+    max_processed_sec_emitted = [0.0]
 
     def ticker_tiempo_real():
         pct_inicio = 15.0
@@ -1325,8 +1327,13 @@ def transcribir(file_path: str, model_name: str, language: str,
                 current_frames = min(total_frames, confirmed_frames + interpolated_frames)
 
                 frac = min(0.999, max(0.0, current_frames / float(total_frames)))
-                pct_global = pct_inicio + frac * (pct_fin - pct_inicio)
-                processed_sec = min(audio_duration, current_frames / 100.0)
+                raw_pct = pct_inicio + frac * (pct_fin - pct_inicio)
+                max_pct_emitted[0] = max(max_pct_emitted[0], min(pct_fin, raw_pct))
+                pct_global = max_pct_emitted[0]
+
+                raw_processed = min(audio_duration, current_frames / 100.0)
+                max_processed_sec_emitted[0] = max(max_processed_sec_emitted[0], raw_processed)
+                processed_sec = max_processed_sec_emitted[0]
 
                 # Estimación de tiempo multi-etapa continua (Whisper + etapas posteriores)
                 overhead_post = (max(4.0, audio_duration * 0.08) + 2.0) if diarize else 2.0
@@ -1379,12 +1386,18 @@ def transcribir(file_path: str, model_name: str, language: str,
 
                     pct_inicio = 15.0
                     pct_fin = 70.0 if diarize else 90.0
-                    pct_global = pct_inicio + frac * (pct_fin - pct_inicio)
+                    raw_pct = pct_inicio + frac * (pct_fin - pct_inicio)
+                    max_pct_emitted[0] = max(max_pct_emitted[0], min(pct_fin, raw_pct))
+                    pct_global = max_pct_emitted[0]
+
+                    raw_processed = min(audio_duration, self.n / 100.0)
+                    max_processed_sec_emitted[0] = max(max_processed_sec_emitted[0], raw_processed)
+                    processed_sec = max_processed_sec_emitted[0]
+
                     overhead_post = (max(4.0, audio_duration * 0.08) + 2.0) if diarize else 2.0
                     total_time_est = elapsed / max(0.01, frac)
                     eta_whisper = max(0.0, total_time_est - elapsed)
                     eta_sec = eta_whisper + overhead_post
-                    processed_sec = min(audio_duration, self.n / 100.0)
 
                     last_progress_emit[0] = now
                     prog_data = {
@@ -1526,14 +1539,16 @@ def transcribir(file_path: str, model_name: str, language: str,
     # ── RUTA RÁPIDA: Diarización Desactivada por el Usuario ─────────────────────
     if not diarize:
         print(f"[whisper_runner] ETAPA 3/3: Estructurando expediente y aplicando pulido ortográfico pericial...", file=sys.stderr, flush=True)
+        max_pct_emitted[0] = max(max_pct_emitted[0], 92.0)
+        max_processed_sec_emitted[0] = max(max_processed_sec_emitted[0], audio_duration)
         prog_data = {
-            "pct": 92.0,
+            "pct": round(max_pct_emitted[0], 1),
             "eta_sec": 2,
             "speed": 3.5,
             "stage": 3,
             "substage": "Estructuración Pericial",
             "action": "Estructurando expediente, alineando marcas de tiempo y aplicando pulido ortográfico",
-            "processed_sec": round(duration, 1),
+            "processed_sec": round(max_processed_sec_emitted[0], 1),
             "total_sec": round(audio_duration, 1),
             "msg": "Estructurando expediente y aplicando pulido ortográfico pericial..."
         }
@@ -1564,14 +1579,16 @@ def transcribir(file_path: str, model_name: str, language: str,
         }
 
     # ── ETAPA 3/4: Diarización de interlocutores ──────────────────────────────
+    max_pct_emitted[0] = max(max_pct_emitted[0], 74.0)
+    max_processed_sec_emitted[0] = max(max_processed_sec_emitted[0], audio_duration)
     prog_data = {
-        "pct": 74.0,
+        "pct": round(max_pct_emitted[0], 1),
         "eta_sec": max(4, round(audio_duration * 0.08)) + 2,
         "speed": 2.5,
         "stage": 3,
         "substage": "Diarización de Voces",
         "action": "Extrayendo perfiles de voz y clustering para discriminar interlocutores",
-        "processed_sec": round(duration, 1),
+        "processed_sec": round(max_processed_sec_emitted[0], 1),
         "total_sec": round(audio_duration, 1),
         "msg": "Diarizando voces y discriminando interlocutores periciales..."
     }
@@ -1599,14 +1616,15 @@ def transcribir(file_path: str, model_name: str, language: str,
     if usar_pyannote and diar_result_pyannote is not None:
         # Reconciliación desacoplada Whisper (texto) + pyannote (hablantes y tiempos)
         print(f"[whisper_runner] ETAPA 4/4: Reconciliando transcripción con diarización exclusiva y estructurando expediente...", file=sys.stderr, flush=True)
+        max_pct_emitted[0] = max(max_pct_emitted[0], 94.0)
         prog_data = {
-            "pct": 94.0,
+            "pct": round(max_pct_emitted[0], 1),
             "eta_sec": 2,
             "speed": 4.0,
             "stage": 4,
             "substage": "Estructuración y Sellado",
             "action": "Reconciliando intervenciones con hablantes y generando actas forenses",
-            "processed_sec": round(duration, 1),
+            "processed_sec": round(max_processed_sec_emitted[0], 1),
             "total_sec": round(audio_duration, 1),
             "msg": "Reconciliando transcripción con diarización y generando actas..."
         }
