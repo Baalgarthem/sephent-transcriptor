@@ -35,6 +35,7 @@ export interface ConfiguracionUsuario {
   outputSrt: boolean;
   outputVideo: boolean;
   modoDestino: ModoDestinoSalida;
+  rutaDestinoPersonalizada?: string | null;
   rutaModelosPersonalizada?: string | null;
   rolesPersonalizados?: string[];
   mostrarRolEnNombre?: boolean;
@@ -53,7 +54,8 @@ export class UserSettingsService {
     outputTxt: true,
     outputSrt: false,
     outputVideo: false,
-    modoDestino: 'default',
+    modoDestino: 'original',
+    rutaDestinoPersonalizada: null,
     rolesPersonalizados: [],
     mostrarRolEnNombre: false,
     interfazGraficaId: 'classic',
@@ -86,8 +88,9 @@ export class UserSettingsService {
       }
     }
 
-    // Sincronizar modo destino de OutputPathService
+    // Sincronizar modo destino y ruta personalizada de OutputPathService
     const modoDestinoPersistido = OutputPathService.obtenerModoActual();
+    const rutaDestinoPersistida = OutputPathService.obtenerRutaPersonalizada();
 
     const rolesPersistidos = this.obtenerRolesPersonalizadosPrivado();
 
@@ -99,6 +102,9 @@ export class UserSettingsService {
       outputSrt: typeof configRecuperada.outputSrt === 'boolean' ? configRecuperada.outputSrt : this.configuracionPorDefecto.outputSrt,
       outputVideo: typeof configRecuperada.outputVideo === 'boolean' ? configRecuperada.outputVideo : this.configuracionPorDefecto.outputVideo,
       modoDestino: configRecuperada.modoDestino || modoDestinoPersistido || this.configuracionPorDefecto.modoDestino,
+      rutaDestinoPersonalizada: configRecuperada.rutaDestinoPersonalizada !== undefined
+        ? configRecuperada.rutaDestinoPersonalizada
+        : (rutaDestinoPersistida ?? null),
       rutaModelosPersonalizada: configRecuperada.rutaModelosPersonalizada !== undefined
         ? configRecuperada.rutaModelosPersonalizada
         : (WhisperPathService.obtenerRutaOficialPorDefecto().esRutaPersonalizada ? WhisperPathService.obtenerRutaOficialPorDefecto().rutaPorDefectoOficial : null),
@@ -127,6 +133,9 @@ export class UserSettingsService {
     }
     if (parcial.modoDestino) {
       OutputPathService.establecerModo(parcial.modoDestino);
+    }
+    if (parcial.rutaDestinoPersonalizada !== undefined) {
+      OutputPathService.establecerRutaPersonalizada(parcial.rutaDestinoPersonalizada);
     }
     if (parcial.rutaModelosPersonalizada !== undefined) {
       WhisperPathService.guardarRutaPersonalizada(parcial.rutaModelosPersonalizada || '');
@@ -228,6 +237,8 @@ export class UserSettingsService {
     }
     const def = { ...this.configuracionPorDefecto };
     def.modelo = ModelManager.resolverModeloPorDefecto();
+    OutputPathService.establecerModo('original');
+    OutputPathService.establecerRutaPersonalizada(null);
     this.memoriaConfiguracion = { ...def };
     return { ...def };
   }

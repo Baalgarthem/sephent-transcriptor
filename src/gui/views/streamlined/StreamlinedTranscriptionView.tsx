@@ -19,7 +19,7 @@ import { ModelManager } from '../../../services/modelManager';
 import { UserSettingsService } from '../../../services/userSettingsService';
 import { TranscriptionDatabase, StoredTranscription } from '../../../services/database/transcriptionDatabase';
 import { TranscriptionService } from '../../../services/transcription/transcriptionService';
-import { OutputPathService } from '../../../services/transcription/outputPathService';
+import { OutputPathService, ModoDestinoSalida } from '../../../services/transcription/outputPathService';
 import { THEME_TOKENS } from '../../../config/themeTokens';
 import { TranscriptionProgressBar } from '../../../components/TranscriptionProgressBar';
 
@@ -48,6 +48,10 @@ export default function StreamlinedTranscriptionView(): React.ReactElement {
   const [formatoTxt, setFormatoTxt] = useState<boolean>(configInicial.outputTxt);
   const [formatoSrt, setFormatoSrt] = useState<boolean>(configInicial.outputSrt);
   const [formatoVideo, setFormatoVideo] = useState<boolean>(configInicial.outputVideo);
+  const [modoDestino, setModoDestino] = useState<ModoDestinoSalida>(configInicial.modoDestino || 'original');
+  const [rutaPersonalizada, setRutaPersonalizada] = useState<string | null>(
+    () => configInicial.rutaDestinoPersonalizada || OutputPathService.obtenerRutaPersonalizada()
+  );
 
   // Estados de ejecución
   const [enEjecucion, setEnEjecucion] = useState(false);
@@ -290,20 +294,27 @@ export default function StreamlinedTranscriptionView(): React.ReactElement {
           { txt: resultadoAudio.txtContent, srt: resultadoAudio.srtContent }
         );
 
-        const rutaOrigenDirectorio = ((file as any).__tauriPath || (file as any).path)
-          ? String((file as any).__tauriPath || (file as any).path).replace(/\\/g, '/').split('/').slice(0, -1).join('/')
+        const rutaOrigenArchivo = ((file as any).__tauriPath || (file as any).path)
+          ? String((file as any).__tauriPath || (file as any).path)
+          : '';
+        const rutaOrigenDirectorio = rutaOrigenArchivo
+          ? OutputPathService.extraerDirectorioDeRuta(rutaOrigenArchivo)
           : '';
 
-        const carpetaDestino = rutaOrigenDirectorio
-          ? rutaOrigenDirectorio.replace(/\//g, '\\')
-          : OutputPathService.resolverCarpetaDestino(file.name, 'default');
+        const carpetaDestino = OutputPathService.resolverCarpetaDestino(
+          file.name,
+          modoDestino,
+          rutaOrigenDirectorio
+        );
 
         const salidasBD = record.outputs.map((out: any) => ({
           format: out.formatId,
           fileName: out.fileName,
-          fullPath: rutaOrigenDirectorio
-            ? `${rutaOrigenDirectorio}/${out.fileName}`.replace(/\//g, '\\')
-            : `${OutputPathService.obtenerRutaPorDefecto()}\\${out.fileName}`,
+          fullPath: OutputPathService.resolverRutaCompletaSalida(
+            out.fileName,
+            rutaOrigenArchivo,
+            modoDestino
+          ),
         }));
 
         if (typeof window !== 'undefined' && (window as any).__TAURI__?.invoke) {
@@ -337,7 +348,7 @@ export default function StreamlinedTranscriptionView(): React.ReactElement {
           fileSizeFormatted: `${(file.size / (1024 * 1024)).toFixed(1)} MB`,
           modelUsed: WHISPER_MODELS[modelo]?.nombreVisible || modelo,
           language: idioma === 'auto' ? 'Detección automática' : idioma.toUpperCase(),
-          destinationType: rutaOrigenDirectorio ? 'original' : 'default',
+          destinationType: modoDestino,
           destinationFolder: carpetaDestino,
           outputs: salidasBD,
           status: statusFinal,
@@ -669,6 +680,88 @@ export default function StreamlinedTranscriptionView(): React.ReactElement {
               />
               .SRT
             </label>
+          </div>
+        </div>
+
+        {/* Carpeta Destino */}
+        <div>
+          <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: THEME_TOKENS.colors.textSecondary, marginBottom: '0.35rem' }}>
+            📂 Carpeta Destino:
+          </label>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', fontSize: '0.8rem' }}>
+            <span
+              style={{
+                color: THEME_TOKENS.colors.textPrimary,
+                maxWidth: '180px',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                fontFamily: THEME_TOKENS.fonts.mono,
+                fontSize: '0.75rem',
+              }}
+              title={
+                modoDestino === 'original'
+                  ? 'Misma carpeta del archivo cargado (Predeterminada)'
+                  : modoDestino === 'custom'
+                  ? (rutaPersonalizada || 'Carpeta personalizada')
+                  : OutputPathService.obtenerRutaPorDefecto()
+              }
+            >
+              {modoDestino === 'original'
+                ? '📁 Misma carpeta (Origen)'
+                : modoDestino === 'custom'
+                ? `📁 ${rutaPersonalizada || 'Personalizada'}`
+                : '📁 Documentos'}
+            </span>
+            <button
+              type="button"
+              onClick={async () => {
+                const seleccion = await OutputPathService.seleccionarCarpetaDialogo();
+                if (seleccion) {
+                  setRutaPersonalizada(seleccion);
+                  setModoDestino('custom');
+                  UserSettingsService.guardarConfiguracion({
+                    modoDestino: 'custom',
+                    rutaDestinoPersonalizada: seleccion,
+                  });
+                }
+              }}
+              disabled={enEjecucion}
+              style={{
+                padding: '0.2rem 0.5rem',
+                fontSize: '0.75rem',
+                cursor: 'pointer',
+                background: THEME_TOKENS.colors.surfaceCard,
+                color: THEME_TOKENS.colors.textSecondary,
+                border: `1px solid ${THEME_TOKENS.colors.borderStrong}`,
+                borderRadius: THEME_TOKENS.radii.sm,
+              }}
+              title="Indicar otra ruta de destino"
+            >
+              Cambiar...
+            </button>
+            {modoDestino !== 'original' && (
+              <button
+                type="button"
+                onClick={() => {
+                  setModoDestino('original');
+                  UserSettingsService.guardarConfiguracion({ modoDestino: 'original' });
+                }}
+                disabled={enEjecucion}
+                style={{
+                  padding: '0.2rem 0.35rem',
+                  fontSize: '0.725rem',
+                  cursor: 'pointer',
+                  background: 'none',
+                  color: '#38BDF8',
+                  border: 'none',
+                  textDecoration: 'underline',
+                }}
+                title="Restablecer a la carpeta de origen del archivo (Predeterminada)"
+              >
+                Restablecer
+              </button>
+            )}
           </div>
         </div>
       </div>

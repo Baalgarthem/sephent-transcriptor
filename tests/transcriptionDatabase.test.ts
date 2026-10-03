@@ -33,6 +33,24 @@ async function ejecutarPruebasDatabase() {
     `Ruta por defecto contiene 'Documents\\Transcripciones': "${rutaDefault}"`
   );
 
+  OutputPathService.establecerModo('original');
+  afirmar(
+    OutputPathService.obtenerModoActual() === 'original',
+    'Modo establecido a "original" (predeterminado) correctamente'
+  );
+
+  const carpetaOriginalConDir = OutputPathService.resolverCarpetaDestino('audio.mp3', 'original', 'C:\\AudiosGrabados');
+  afirmar(
+    carpetaOriginalConDir === 'C:\\AudiosGrabados',
+    `Resuelve carpeta original con directorio físico correctamente: "${carpetaOriginalConDir}"`
+  );
+
+  const rutaSalidaOriginal = OutputPathService.resolverRutaCompletaSalida('audio.txt', 'C:\\AudiosGrabados\\audio.mp3', 'original');
+  afirmar(
+    rutaSalidaOriginal === 'C:\\AudiosGrabados\\audio.txt',
+    `Resuelve ruta completa de salida en carpeta de origen: "${rutaSalidaOriginal}"`
+  );
+
   OutputPathService.establecerModo('default');
   afirmar(
     OutputPathService.obtenerModoActual() === 'default',
@@ -46,16 +64,6 @@ async function ejecutarPruebasDatabase() {
   );
 
   OutputPathService.establecerModo('original');
-  afirmar(
-    OutputPathService.obtenerModoActual() === 'original',
-    'Modo establecido a "original" correctamente'
-  );
-
-  const carpetaOriginal = OutputPathService.resolverCarpetaDestino('audio.mp3', 'original');
-  afirmar(
-    carpetaOriginal.includes('Misma carpeta de origen'),
-    `Resuelve carpeta original correctamente: "${carpetaOriginal}"`
-  );
 
   // 2. Validando TranscriptionDatabase CRUD
   console.log('\n🗄️ 2. Validando TranscriptionDatabase (Repository CRUD)...');

@@ -53,8 +53,8 @@ async function ejecutarPruebasUserSettings() {
     'Formato Video MP4 está deshabilitado por defecto'
   );
   afirmar(
-    configDefecto.modoDestino === 'default',
-    `Modo de carpeta de destino por defecto es 'default': "${configDefecto.modoDestino}"`
+    configDefecto.modoDestino === 'original',
+    `Modo de carpeta de destino por defecto es 'original': "${configDefecto.modoDestino}"`
   );
 
   // 2. Persistencia de idioma preferido
@@ -94,23 +94,41 @@ async function ejecutarPruebasUserSettings() {
     'Formatos SRT y Video se mantienen activos sin efectos colaterales'
   );
 
-  // 4. Persistencia de modo de carpeta de destino ('default' vs 'original')
+  // 4. Persistencia de modo de carpeta de destino ('original', 'custom', 'default')
   console.log('\n📁 4. Validando persistencia de modo de carpeta de salida...');
-  UserSettingsService.guardarConfiguracion({ modoDestino: 'original' });
-  const configDestino = UserSettingsService.obtenerConfiguracion();
+  UserSettingsService.guardarConfiguracion({ modoDestino: 'default' });
+  const configDestinoDefault = UserSettingsService.obtenerConfiguracion();
   afirmar(
-    configDestino.modoDestino === 'original',
-    'Modo de carpeta guardado como "original"'
+    configDestinoDefault.modoDestino === 'default',
+    'Modo de carpeta guardado como "default"'
+  );
+  afirmar(
+    OutputPathService.obtenerModoActual() === 'default',
+    'OutputPathService sincroniza inmediatamente con el modo de destino guardado "default"'
+  );
+
+  UserSettingsService.guardarConfiguracion({
+    modoDestino: 'custom',
+    rutaDestinoPersonalizada: 'D:\\TranscripcionesPersonalizadas',
+  });
+  const configDestinoCustom = UserSettingsService.obtenerConfiguracion();
+  afirmar(
+    configDestinoCustom.modoDestino === 'custom' && configDestinoCustom.rutaDestinoPersonalizada === 'D:\\TranscripcionesPersonalizadas',
+    'Modo de carpeta guardado como "custom" con ruta personalizada'
+  );
+  afirmar(
+    OutputPathService.obtenerRutaPersonalizada() === 'D:\\TranscripcionesPersonalizadas',
+    'OutputPathService sincroniza inmediatamente la ruta personalizada'
+  );
+
+  UserSettingsService.guardarConfiguracion({ modoDestino: 'original' });
+  afirmar(
+    UserSettingsService.obtenerConfiguracion().modoDestino === 'original',
+    'Modo de carpeta retornado a "original" se persiste con éxito'
   );
   afirmar(
     OutputPathService.obtenerModoActual() === 'original',
-    'OutputPathService sincroniza inmediatamente con el modo de destino guardado'
-  );
-
-  UserSettingsService.guardarConfiguracion({ modoDestino: 'default' });
-  afirmar(
-    UserSettingsService.obtenerConfiguracion().modoDestino === 'default',
-    'Modo de carpeta retornado a "default" se persiste con éxito'
+    'OutputPathService sincroniza inmediatamente con "original"'
   );
 
   // 5. Persistencia de modelo seleccionado

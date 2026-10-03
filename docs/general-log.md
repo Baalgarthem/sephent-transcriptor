@@ -2,6 +2,41 @@
 
 Este documento registra cronológicamente cada cambio, decisión de diseño y evento relevante ocurrido en el proyecto **Sephent Transcriptor**, de acuerdo con las normas de trazabilidad de `AGENTS.md`.
 
+## [2026-10-03 14:45] - Ruta Destino de Archivos Generados en Carpeta Origen por Defecto
+
+- **Responsable:** Agente Asistente (DeepMind / Antigravity).
+- **Motivo del cambio:** Requerimiento del usuario:
+  *"Al finalizar, los archivos generados, su ruta destino siempre será la ruta origen del archivo o archivos cargados a menos que el usuario indique otra ruta."*
+- **Detalle de la solución:**
+  1. **Configuración y Servicio Centralizado (`OutputPathService` & `UserSettingsService`):**
+     - Se fijó `modoDestino: 'original'` como valor predeterminado de fábrica en todos los servicios y configuraciones de usuario.
+     - Se añadió soporte para `ModoDestinoSalida = 'original' | 'custom' | 'default'`.
+     - Se implementó `OutputPathService.resolverRutaCompletaSalida(...)` y `extraerDirectorioDeRuta(...)` para centralizar la resolución de rutas completas de forma uniforme e idéntica en toda la aplicación (DRY).
+     - Si se cargan múltiples archivos desde diferentes directorios, cada archivo generado (`.txt`, `.srt`, etc.) se guarda estrictamente en la carpeta de origen de su respectivo archivo cargado.
+     - Si el usuario indica otra ruta (modo `'custom'` con selector nativo de carpetas o modo `'default'` para la carpeta predeterminada del sistema), se respeta y recuerda la elección del usuario.
+     - En entornos sin ruta física local (ej. navegadores web), se implementó un fallback seguro hacia la ruta por defecto del sistema sin arrojar excepciones.
+  2. **Vistas Gráficas (`ClassicTranscriptionView.tsx` y `StreamlinedTranscriptionView.tsx`):**
+     - Se actualizó el guardado físico de archivos para utilizar `OutputPathService.resolverRutaCompletaSalida(...)`.
+     - En la interfaz clásica, se actualizó el sidebar para mostrar *"Misma carpeta de origen (Predeterminada)"* en primera posición, con soporte explícito para *"Carpeta personalizada..."* mediante diálogo nativo de selección de carpetas y *"Ruta oficial por defecto"*.
+     - En la interfaz ágil, se incorporó el control visual interactivo de carpeta de destino con opción de cambiar o restablecer a la carpeta de origen.
+  3. **Certificación y Pruebas Unitarias:**
+     - Nueva suite forense `tests/outputPathService.test.ts` con 13 pruebas unitarias específicas para resolución por defecto, carpetas múltiples, rutas personalizadas, formato Windows/POSIX y fallback web.
+     - Integración de la nueva suite en `release.ts` elevando la cobertura a 15 suites de pruebas forenses completas (15/15 pasando al 100%).
+- **Archivos modificados/creados:**
+  - `src/services/transcription/outputPathService.ts`
+  - `src/services/userSettingsService.ts`
+  - `src/services/database/transcriptionDatabase.ts`
+  - `src/gui/views/classic/ClassicTranscriptionView.tsx`
+  - `src/gui/views/streamlined/StreamlinedTranscriptionView.tsx`
+  - `src/components/danger/DangerZoneSection.tsx`
+  - `tests/outputPathService.test.ts` (nueva)
+  - `tests/userSettings.test.ts`
+  - `tests/transcriptionDatabase.test.ts`
+  - `release.ts`
+- **Resultado:** 15 suites de pruebas forenses superadas al 100%, compilación limpia con Vite y `cargo check` impecable. Los archivos generados ahora siempre residen en la carpeta origen del archivo procesado a menos que el usuario indique lo contrario.
+
+---
+
 ## [2026-09-26 12:45] - Versión 1.3.0: Inyección de Dependencias, Telemetría con ETA en Progreso y Desacoplamiento Pericial (Estilo Arturo)
 
 - **Responsable:** Agente Asistente (DeepMind / Antigravity).

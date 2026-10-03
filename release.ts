@@ -488,6 +488,7 @@ export const TEST_SUITES = [
   'tests/etaNormalization.test.ts',
   'tests/guiManager.test.ts',
   'tests/modelManager.test.ts',
+  'tests/outputPathService.test.ts',
   'tests/partialAndErrorResilience.test.ts',
   'tests/reviewer.test.ts',
   'tests/silentExecutionAndPlatform.test.ts',

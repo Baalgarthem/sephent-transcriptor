@@ -91,7 +91,8 @@ export const DangerZoneSection: React.FC<DangerZoneSectionProps> = ({ alEjecutar
         outputTxt: true,
         outputSrt: true,
         outputVideo: false,
-        modoDestino: 'default',
+        modoDestino: 'original',
+        rutaDestinoPersonalizada: null,
       });
       eliminados.push('Preferencias de usuario');
     }

@@ -21,7 +21,7 @@ export interface StoredTranscription {
   language: string;
   date: string;
   timestamp: number;
-  destinationType: 'default' | 'original';
+  destinationType: 'original' | 'custom' | 'default' | string;
   destinationFolder: string;
   outputs: SalidaGeneradaInfo[];
   status: 'completado' | 'parcial' | 'error';

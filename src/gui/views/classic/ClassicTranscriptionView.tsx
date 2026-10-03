@@ -87,7 +87,10 @@ export default function ClassicTranscriptionView(): React.ReactElement {
   const [isDragOver, setIsDragOver] = useState(false);
 
   // Modo de destino de las transcripciones y base de datos persistente
-  const [modoDestino, setModoDestino] = useState<ModoDestinoSalida>(configInicial.modoDestino);
+  const [modoDestino, setModoDestino] = useState<ModoDestinoSalida>(configInicial.modoDestino || 'original');
+  const [rutaPersonalizada, setRutaPersonalizada] = useState<string | null>(
+    () => configInicial.rutaDestinoPersonalizada || OutputPathService.obtenerRutaPersonalizada()
+  );
   const [historialBD, setHistorialBD] = useState<StoredTranscription[]>(() => TranscriptionDatabase.obtenerTodas());
   const [mostrarHistorialBD, setMostrarHistorialBD] = useState(false);
 
@@ -264,6 +267,18 @@ export default function ClassicTranscriptionView(): React.ReactElement {
   const handleCambiarModoDestino = (nuevoModo: ModoDestinoSalida) => {
     setModoDestino(nuevoModo);
     UserSettingsService.guardarConfiguracion({ modoDestino: nuevoModo });
+  };
+
+  const handleSeleccionarCarpetaPersonalizada = async () => {
+    const seleccion = await OutputPathService.seleccionarCarpetaDialogo();
+    if (seleccion) {
+      setRutaPersonalizada(seleccion);
+      setModoDestino('custom');
+      UserSettingsService.guardarConfiguracion({
+        modoDestino: 'custom',
+        rutaDestinoPersonalizada: seleccion,
+      });
+    }
   };
 
   const handleAbrirCarpetaLogs = async () => {
@@ -611,18 +626,25 @@ export default function ClassicTranscriptionView(): React.ReactElement {
           }
         );
 
-        const carpetaDestino = OutputPathService.resolverCarpetaDestino(file.name, modoDestino);
-        const rutaOrigenDirectorio = ((file as any).__tauriPath || (file as any).path)
-          ? String((file as any).__tauriPath || (file as any).path).replace(/\\/g, '/').split('/').slice(0, -1).join('/')
+        const rutaOrigenArchivo = ((file as any).__tauriPath || (file as any).path)
+          ? String((file as any).__tauriPath || (file as any).path)
+          : '';
+        const rutaOrigenDirectorio = rutaOrigenArchivo
+          ? OutputPathService.extraerDirectorioDeRuta(rutaOrigenArchivo)
           : '';
 
+        const carpetaDestino = OutputPathService.resolverCarpetaDestino(
+          file.name,
+          modoDestino,
+          rutaOrigenDirectorio
+        );
+
         const salidasBD = record.outputs.map((out) => {
-          let fullPath = '';
-          if (modoDestino === 'original' && rutaOrigenDirectorio) {
-            fullPath = `${rutaOrigenDirectorio}/${out.fileName}`.replace(/\//g, '\\');
-          } else {
-            fullPath = `${OutputPathService.obtenerRutaPorDefecto()}\\${out.fileName}`;
-          }
+          const fullPath = OutputPathService.resolverRutaCompletaSalida(
+            out.fileName,
+            rutaOrigenArchivo,
+            modoDestino
+          );
           return {
             format: out.formatId,
             fileName: out.fileName,
@@ -992,16 +1014,7 @@ export default function ClassicTranscriptionView(): React.ReactElement {
                 Carpeta de guardado
               </label>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', marginBottom: '0.4rem' }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.785rem', cursor: 'pointer' }}>
-                  <input
-                    type="radio"
-                    name="modoDestinoSalidaSidebar"
-                    value="default"
-                    checked={modoDestino === 'default'}
-                    onChange={() => handleCambiarModoDestino('default')}
-                  />
-                  Ruta oficial por defecto
-                </label>
+                {/* Opción 1: Misma carpeta del archivo cargado (Predeterminada) */}
                 <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.785rem', cursor: 'pointer' }}>
                   <input
                     type="radio"
@@ -1010,13 +1023,72 @@ export default function ClassicTranscriptionView(): React.ReactElement {
                     checked={modoDestino === 'original'}
                     onChange={() => handleCambiarModoDestino('original')}
                   />
-                  Misma carpeta del archivo
+                  <span>Misma carpeta de origen <strong>(Predeterminada)</strong></span>
+                </label>
+
+                {/* Opción 2: Carpeta personalizada elegida por el usuario */}
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.785rem', cursor: 'pointer' }}>
+                  <input
+                    type="radio"
+                    name="modoDestinoSalidaSidebar"
+                    value="custom"
+                    checked={modoDestino === 'custom'}
+                    onChange={() => {
+                      handleCambiarModoDestino('custom');
+                      if (!rutaPersonalizada) {
+                        handleSeleccionarCarpetaPersonalizada();
+                      }
+                    }}
+                  />
+                  <span>Carpeta personalizada...</span>
+                </label>
+
+                {/* Opción 3: Ruta oficial por defecto (Documentos) */}
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.785rem', cursor: 'pointer' }}>
+                  <input
+                    type="radio"
+                    name="modoDestinoSalidaSidebar"
+                    value="default"
+                    checked={modoDestino === 'default'}
+                    onChange={() => handleCambiarModoDestino('default')}
+                  />
+                  <span>Ruta oficial por defecto (Documentos)</span>
                 </label>
               </div>
+
+              {/* Si está en modo personalizado, botón para examinar */}
+              {modoDestino === 'custom' && (
+                <div style={{ marginBottom: '0.4rem' }}>
+                  <button
+                    type="button"
+                    onClick={handleSeleccionarCarpetaPersonalizada}
+                    disabled={isRunning}
+                    style={{
+                      width: '100%',
+                      padding: '0.35rem 0.5rem',
+                      fontSize: '0.75rem',
+                      cursor: 'pointer',
+                      backgroundColor: THEME_TOKENS.colors.surfaceCard,
+                      color: THEME_TOKENS.colors.textPrimary,
+                      border: `1px solid ${THEME_TOKENS.colors.borderStrong}`,
+                      borderRadius: THEME_TOKENS.radii.sm,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '0.35rem',
+                    }}
+                  >
+                    📁 {rutaPersonalizada ? 'Cambiar carpeta destino...' : 'Seleccionar carpeta destino...'}
+                  </button>
+                </div>
+              )}
+
               <p style={{ fontFamily: THEME_TOKENS.fonts.mono, fontSize: '0.725rem', color: THEME_TOKENS.colors.textMuted, margin: 0, wordBreak: 'break-all' }}>
-                {modoDestino === 'default'
-                  ? OutputPathService.obtenerRutaPorDefecto()
-                  : 'Carpeta contenedora del archivo cargado'}
+                {modoDestino === 'original'
+                  ? 'Carpeta de origen de cada archivo cargado'
+                  : modoDestino === 'custom'
+                  ? (rutaPersonalizada || 'Ninguna carpeta seleccionada (usará Documentos)')
+                  : OutputPathService.obtenerRutaPorDefecto()}
               </p>
             </div>
           </div>
