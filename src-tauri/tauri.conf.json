@@ -9,7 +9,7 @@
   },
   "package": {
     "productName": "Sephent Transcriptor",
-    "version": "1.5.1"
+    "version": "1.5.2"
   },
   "tauri": {
     "allowlist": {
@@ -35,11 +35,18 @@
       "http": {
         "all": true,
         "request": true,
-        "scope": ["https://*"]
+        "scope": [
+          "https://*"
+        ]
       },
       "fs": {
         "all": true,
-        "scope": ["$APPDATA/*", "$RESOURCE/*", "$TEMP/*", "$DOWNLOAD/*"]
+        "scope": [
+          "$APPDATA/*",
+          "$RESOURCE/*",
+          "$TEMP/*",
+          "$DOWNLOAD/*"
+        ]
       }
     },
     "bundle": {
@@ -71,7 +78,10 @@
         "WebView2Loader.dll"
       ],
       "shortDescription": "Sephent Transcriptor Pericial",
-      "targets": ["msi", "nsis"],
+      "targets": [
+        "msi",
+        "nsis"
+      ],
       "windows": {
         "certificateThumbprint": null,
         "digestAlgorithm": "sha256",
