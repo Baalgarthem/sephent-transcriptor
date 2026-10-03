@@ -13,6 +13,12 @@ export default defineConfig({
     outDir: 'dist-web',
     rollupOptions: {
       input: resolve(__dirname, 'index.html'),
+      output: {
+        manualChunks: {
+          'vendor-react': ['react', 'react-dom'],
+          'tauri-api': ['@tauri-apps/api'],
+        },
+      },
     },
   },
 });

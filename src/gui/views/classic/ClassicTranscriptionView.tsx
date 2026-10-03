@@ -335,19 +335,27 @@ export default function ClassicTranscriptionView(): React.ReactElement {
   useEffect(() => {
     const tauri = typeof window !== 'undefined' ? (window as any).__TAURI__ : null;
     if (tauri?.event?.listen) {
+      let activo = true;
       let desuscribir: (() => void) | undefined = undefined;
+
       tauri.event
         .listen('tauri://file-drop', (event: any) => {
+          if (!activo) return;
           if (Array.isArray(event.payload) && event.payload.length > 0) {
             agregarArchivosPorRuta(event.payload);
           }
         })
         .then((fn: () => void) => {
-          desuscribir = fn;
+          if (activo) {
+            desuscribir = fn;
+          } else {
+            fn(); // Limpieza inmediata si el componente ya se desmontó
+          }
         })
         .catch(() => {});
 
       return () => {
+        activo = false;
         if (desuscribir) desuscribir();
       };
     }
