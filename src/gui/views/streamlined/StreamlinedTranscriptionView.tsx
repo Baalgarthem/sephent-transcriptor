@@ -573,6 +573,7 @@ export default function StreamlinedTranscriptionView(): React.ReactElement {
               borderRadius: THEME_TOKENS.radii.sm,
               border: `1px solid ${THEME_TOKENS.colors.borderStrong}`,
               backgroundColor: THEME_TOKENS.colors.surfaceBase,
+              color: THEME_TOKENS.colors.textPrimary,
               fontSize: '0.85rem',
             }}
           >
@@ -602,6 +603,7 @@ export default function StreamlinedTranscriptionView(): React.ReactElement {
               borderRadius: THEME_TOKENS.radii.sm,
               border: `1px solid ${THEME_TOKENS.colors.borderStrong}`,
               backgroundColor: THEME_TOKENS.colors.surfaceBase,
+              color: THEME_TOKENS.colors.textPrimary,
               fontSize: '0.85rem',
             }}
           >
@@ -687,7 +689,7 @@ export default function StreamlinedTranscriptionView(): React.ReactElement {
             📄 Formatos de Salida:
           </label>
           <div style={{ display: 'flex', gap: '0.5rem' }}>
-            <label style={{ fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.25rem', cursor: 'pointer' }}>
+            <label style={{ fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.25rem', cursor: 'pointer', color: THEME_TOKENS.colors.textPrimary }}>
               <input
                 type="checkbox"
                 checked={formatoTxt}
@@ -699,7 +701,7 @@ export default function StreamlinedTranscriptionView(): React.ReactElement {
               />
               .TXT
             </label>
-            <label style={{ fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.25rem', cursor: 'pointer' }}>
+            <label style={{ fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.25rem', cursor: 'pointer', color: THEME_TOKENS.colors.textPrimary }}>
               <input
                 type="checkbox"
                 checked={formatoSrt}
@@ -855,7 +857,7 @@ export default function StreamlinedTranscriptionView(): React.ReactElement {
         {archivos.length > 0 && (
           <div style={{ marginTop: '1.25rem', textAlign: 'left', backgroundColor: THEME_TOKENS.colors.surfaceBase, padding: '0.75rem 1rem', borderRadius: THEME_TOKENS.radii.sm, border: `1px solid ${THEME_TOKENS.colors.borderSubtle}` }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-              <strong style={{ fontSize: '0.825rem' }}>Archivos listos para procesar ({archivos.length}):</strong>
+              <strong style={{ fontSize: '0.825rem', color: THEME_TOKENS.colors.textPrimary }}>Archivos listos para procesar ({archivos.length}):</strong>
               <button
                 onClick={() => setArchivos([])}
                 disabled={enEjecucion}
@@ -867,7 +869,7 @@ export default function StreamlinedTranscriptionView(): React.ReactElement {
             <ul style={{ margin: 0, paddingLeft: '1.25rem', fontSize: '0.8rem', color: THEME_TOKENS.colors.textSecondary }}>
               {archivos.map((f, idx) => (
                 <li key={idx} style={{ marginBottom: '0.25rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span title={(f as any).__tauriPath || (f as any).path || f.name} style={{ textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap', maxWidth: '650px' }}>
+                  <span title={(f as any).__tauriPath || (f as any).path || f.name} style={{ textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap', maxWidth: '650px', color: THEME_TOKENS.colors.textPrimary }}>
                     🎵 {f.name} {f.size > 0 ? `(${(f.size / (1024 * 1024)).toFixed(2)} MB)` : ''}
                   </span>
                   <button
@@ -982,9 +984,9 @@ export default function StreamlinedTranscriptionView(): React.ReactElement {
           onClick={handleIniciar}
           disabled={enEjecucion || archivos.length === 0}
           style={{
-            backgroundColor: enEjecucion || archivos.length === 0 ? THEME_TOKENS.colors.bgSecondary : '#0F172A',
-            color: enEjecucion || archivos.length === 0 ? THEME_TOKENS.colors.textMuted : '#FFFFFF',
-            border: `1px solid ${enEjecucion || archivos.length === 0 ? THEME_TOKENS.colors.borderStrong : '#0F172A'}`,
+            backgroundColor: enEjecucion || archivos.length === 0 ? THEME_TOKENS.colors.bgSecondary : THEME_TOKENS.colors.accentPrimary,
+            color: enEjecucion || archivos.length === 0 ? THEME_TOKENS.colors.textMuted : THEME_TOKENS.colors.textOnDark,
+            border: `1px solid ${enEjecucion || archivos.length === 0 ? THEME_TOKENS.colors.borderStrong : THEME_TOKENS.colors.accentDark}`,
             padding: '0.75rem 2.5rem',
             borderRadius: THEME_TOKENS.radii.sm,
             fontSize: '0.95rem',
@@ -1051,17 +1053,11 @@ export default function StreamlinedTranscriptionView(): React.ReactElement {
                     {t.fileName}
                   </strong>
                   <span style={{ fontSize: '0.75rem', color: THEME_TOKENS.colors.textMuted, marginLeft: '0.65rem' }}>
-                    {t.horaInicio && t.horaFin ? (
-                      <>
-                        {t.date ? `${t.date.split(',')[0]} · ` : ''}
-                        Inicio: {t.horaInicio} · Fin: {t.horaFin} · Tardó: {t.duracionFormateada || '0s'} · Modelo: {t.modelUsed} · {t.rawSegments?.length || 0} fragmentos
-                      </>
-                    ) : (
-                      <>
-                        {t.date}
-                        {t.duracionFormateada ? ` · Tardó: ${t.duracionFormateada}` : ''} · Modelo: {t.modelUsed} · {t.rawSegments?.length || 0} fragmentos
-                      </>
-                    )}
+                    {t.date ? `${t.date.split(',')[0]} · ` : ''}
+                    {t.horaInicio ? `Inicio: ${t.horaInicio} · ` : ''}
+                    {t.horaFin ? `Fin: ${t.horaFin} · ` : ''}
+                    {t.duracionFormateada ? `Tardó: ${t.duracionFormateada} · ` : (t.duracionSegundos ? `Tardó: ${t.duracionSegundos}s · ` : '')}
+                    Modelo: {t.modelUsed} · {t.rawSegments?.length || 0} fragmentos
                   </span>
                 </div>
                 <div style={{ display: 'flex', gap: '0.45rem' }}>

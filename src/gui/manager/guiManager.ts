@@ -12,7 +12,7 @@ import { UserSettingsService } from '../../services/userSettingsService';
 
 export class GUIManager implements IGUIManager {
   private interfaces = new Map<string, IGUIView>();
-  private idActivo: string = 'classic';
+  private idActivo: string = 'streamlined';
   private oyentes: Set<(gui: IGUIView) => void> = new Set();
 
   constructor() {
@@ -22,7 +22,7 @@ export class GUIManager implements IGUIManager {
         this.idActivo = config.interfazGraficaId;
       }
     } catch {
-      this.idActivo = 'classic';
+      this.idActivo = 'streamlined';
     }
   }
 

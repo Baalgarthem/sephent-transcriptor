@@ -58,7 +58,7 @@ export class UserSettingsService {
     rutaDestinoPersonalizada: null,
     rolesPersonalizados: [],
     mostrarRolEnNombre: false,
-    interfazGraficaId: 'classic',
+    interfazGraficaId: 'streamlined',
     evitarTruncamiento: true,
   };
 
