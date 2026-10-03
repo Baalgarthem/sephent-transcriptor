@@ -96,7 +96,7 @@ export function buildApplicationContainer(): DIContainer {
   container.register<ITelemetryService>(
     DI_TOKENS.TELEMETRY_SERVICE,
     () => new TelemetryService(),
-    false // Transient para que cada sesión tenga su propio ciclo si se requiere
+    true // Singleton: la sesión de telemetría debe ser compartida durante toda la transcripción
   );
 
   // 5. Gestor de Interfaces Gráficas Pluggables

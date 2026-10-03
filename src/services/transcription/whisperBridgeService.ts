@@ -85,7 +85,30 @@ export class WhisperBridgeService {
           if (payload && onProgreso) {
             const pct = typeof payload.porcentaje === 'number' ? payload.porcentaje : 50;
             const msg = payload.mensaje || 'Procesando con Whisper...';
-            onProgreso(pct, msg, payload);
+
+            // Extraer todos los campos de telemetría que Rust emite para la barra de progreso
+            const extra = {
+              tiempoEstimadoSegundos: typeof payload.tiempoEstimadoSegundos === 'number'
+                ? payload.tiempoEstimadoSegundos
+                : undefined,
+              velocidadFactor: typeof payload.velocidadFactor === 'number'
+                ? payload.velocidadFactor
+                : undefined,
+              etapaActual: typeof payload.etapaActual === 'number'
+                ? payload.etapaActual
+                : undefined,
+              totalEtapas: typeof payload.totalEtapas === 'number'
+                ? payload.totalEtapas
+                : undefined,
+              segundosProcesadosAudio: typeof payload.segundosProcesadosAudio === 'number'
+                ? payload.segundosProcesadosAudio
+                : undefined,
+              totalSegundosAudio: typeof payload.totalSegundosAudio === 'number'
+                ? payload.totalSegundosAudio
+                : undefined,
+            };
+
+            onProgreso(pct, msg, extra);
           }
         });
       } catch (e) {
@@ -160,12 +183,15 @@ export class WhisperBridgeService {
       filePath &&
       (filePath.includes(':\\') || filePath.includes(':/') || filePath.startsWith('/'));
 
-    // Si no tenemos la ruta absoluta en disco, guardamos los bytes temporalmente
+    // Si no tenemos la ruta absoluta en disco, intentamos guardar los bytes temporalmente
     if (!esRutaAbsoluta && tauri?.invoke && typeof file.arrayBuffer === 'function') {
       if (opciones.onProgreso) {
         opciones.onProgreso(5, `Preparando archivo en disco para decodificación...`);
       }
       try {
+        if (file.size && file.size > 150 * 1024 * 1024) {
+          throw new Error(`El archivo "${file.name}" (${(file.size / (1024 * 1024)).toFixed(1)} MB) requiere selección directa por explorador de archivos para optimizar memoria.`);
+        }
         const buffer = await file.arrayBuffer();
         const bytes = Array.from(new Uint8Array(buffer));
         filePath = await tauri.invoke('guardar_archivo_temporal', {
@@ -173,12 +199,14 @@ export class WhisperBridgeService {
           datosBytes: bytes,
         });
       } catch (err: any) {
-        console.warn('Error al guardar archivo temporal para Whisper:', err);
+        console.warn('Aviso al guardar archivo temporal para Whisper:', err);
       }
     }
 
     if (!filePath || (!filePath.includes(':\\') && !filePath.includes(':/') && !filePath.startsWith('/'))) {
-      filePath = file.name;
+      throw new Error(
+        `No se pudo resolver la ruta física en disco para "${file.name}". Por favor selecciona el archivo usando el botón "Seleccionar Archivos" o arrástralo a la ventana para lectura directa.`
+      );
     }
 
     return WhisperBridgeService.transcribirConTauri(filePath, opciones);

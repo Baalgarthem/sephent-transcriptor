@@ -51,8 +51,12 @@ export default function StreamlinedTranscriptionView(): React.ReactElement {
 
   // Estados de ejecución
   const [enEjecucion, setEnEjecucion] = useState(false);
+  const [transcripcionCompletada, setTranscripcionCompletada] = useState(false);
   const [cancelando, setCancelando] = useState(false);
+  const [errorMensaje, setErrorMensaje] = useState<string | null>(null);
   const cancelacionSolicitada = useRef(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   const [telemetria, setTelemetria] = useState<{
     porcentaje: number;
     etapaActual: number;
@@ -65,8 +69,8 @@ export default function StreamlinedTranscriptionView(): React.ReactElement {
     nombreArchivo?: string;
   }>({
     porcentaje: 0,
-    etapaActual: 0,
-    totalEtapas: 4,
+    etapaActual: 1,
+    totalEtapas: configInicial.diarizarHablantes ?? true ? 4 : 3,
     mensaje: '',
     tiempoEstimadoSegundos: 0,
     velocidadFactor: 1.0,
@@ -80,11 +84,102 @@ export default function StreamlinedTranscriptionView(): React.ReactElement {
     setUltimasTranscripciones(TranscriptionDatabase.obtenerTodas().slice(0, 5));
   }, [enEjecucion]);
 
+  // Listener para arrastrar y soltar archivos en la ventana nativa de Tauri
+  useEffect(() => {
+    const tauri = typeof window !== 'undefined' ? (window as any).__TAURI__ : null;
+    if (tauri?.event?.listen) {
+      let desuscribir: (() => void) | undefined = undefined;
+      tauri.event
+        .listen('tauri://file-drop', (event: any) => {
+          if (Array.isArray(event.payload) && event.payload.length > 0) {
+            agregarArchivosPorRuta(event.payload);
+          }
+        })
+        .then((fn: () => void) => {
+          desuscribir = fn;
+        })
+        .catch(() => {});
+
+      return () => {
+        if (desuscribir) desuscribir();
+      };
+    }
+  }, []);
+
+  /**
+   * Agrega archivos conservando su ruta absoluta física en disco para Whisper nativo
+   */
+  const agregarArchivosPorRuta = (rutas: string[]) => {
+    const nuevosObjetos = rutas.map((ruta) => {
+      const normalizada = ruta.replace(/\\/g, '/');
+      const nombre = normalizada.split('/').pop() || 'audio_archivo';
+      const f = new File([''], nombre, { type: 'audio/mpeg' });
+      (f as any).__tauriPath = ruta;
+      (f as any).path = ruta;
+      return f;
+    });
+
+    setArchivos((prev) => {
+      const existentes = new Set(prev.map((f) => (f as any).__tauriPath || (f as any).path || f.name));
+      const noDuplicados = nuevosObjetos.filter((f) => !existentes.has((f as any).__tauriPath || (f as any).path || f.name));
+      return [...prev, ...noDuplicados];
+    });
+    setErrorMensaje(null);
+  };
+
+  /**
+   * Abre el diálogo nativo de Tauri con selector de archivos de audio y video
+   */
+  const handleExaminarArchivos = async () => {
+    const tauri = typeof window !== 'undefined' ? (window as any).__TAURI__ : null;
+    if (tauri?.dialog?.open) {
+      try {
+        const seleccion = await tauri.dialog.open({
+          multiple: true,
+          filters: [
+            {
+              name: 'Archivos de Audio y Video',
+              extensions: ['mp3', 'wav', 'm4a', 'flac', 'ogg', 'wma', 'aac', 'mp4', 'mkv', 'mov', 'avi', 'webm', 'wmv'],
+            },
+          ],
+        });
+        if (seleccion) {
+          const rutas = Array.isArray(seleccion) ? seleccion : [seleccion];
+          agregarArchivosPorRuta(rutas);
+          return;
+        }
+      } catch (err) {
+        console.warn('Diálogo Tauri falló o cancelado:', err);
+      }
+    }
+
+    // Fallback: input de archivo HTML para pruebas o modo web
+    if (fileInputRef.current) {
+      fileInputRef.current.click();
+    }
+  };
+
   const handleSeleccionarArchivos = (e: ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       const nuevos = Array.from(e.target.files);
-      setArchivos((prev) => [...prev, ...nuevos]);
+      const rutas: string[] = [];
+      const otrosArchivos: File[] = [];
+      nuevos.forEach((f) => {
+        const p = (f as any).path || (f as any).__tauriPath;
+        if (p && typeof p === 'string' && (p.includes(':\\') || p.includes(':/') || p.startsWith('/'))) {
+          rutas.push(p);
+        } else {
+          otrosArchivos.push(f);
+        }
+      });
+      if (rutas.length > 0) {
+        agregarArchivosPorRuta(rutas);
+      }
+      if (otrosArchivos.length > 0) {
+        setArchivos((prev) => [...prev, ...otrosArchivos]);
+      }
       e.target.value = '';
+      setErrorMensaje(null);
     }
   };
 
@@ -93,7 +188,23 @@ export default function StreamlinedTranscriptionView(): React.ReactElement {
     setIsDragOver(false);
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
       const nuevos = Array.from(e.dataTransfer.files);
-      setArchivos((prev) => [...prev, ...nuevos]);
+      const rutas: string[] = [];
+      const otrosArchivos: File[] = [];
+      nuevos.forEach((f) => {
+        const p = (f as any).path || (f as any).__tauriPath;
+        if (p && typeof p === 'string' && (p.includes(':\\') || p.includes(':/') || p.startsWith('/'))) {
+          rutas.push(p);
+        } else {
+          otrosArchivos.push(f);
+        }
+      });
+      if (rutas.length > 0) {
+        agregarArchivosPorRuta(rutas);
+      }
+      if (otrosArchivos.length > 0) {
+        setArchivos((prev) => [...prev, ...otrosArchivos]);
+      }
+      setErrorMensaje(null);
     }
   };
 
@@ -164,11 +275,20 @@ export default function StreamlinedTranscriptionView(): React.ReactElement {
           { txt: resultadoAudio.txtContent, srt: resultadoAudio.srtContent }
         );
 
-        const carpetaDestino = OutputPathService.resolverCarpetaDestino(file.name, 'default');
+        const rutaOrigenDirectorio = ((file as any).__tauriPath || (file as any).path)
+          ? String((file as any).__tauriPath || (file as any).path).replace(/\\/g, '/').split('/').slice(0, -1).join('/')
+          : '';
+
+        const carpetaDestino = rutaOrigenDirectorio
+          ? rutaOrigenDirectorio.replace(/\//g, '\\')
+          : OutputPathService.resolverCarpetaDestino(file.name, 'default');
+
         const salidasBD = record.outputs.map((out: any) => ({
           format: out.formatId,
           fileName: out.fileName,
-          fullPath: `${OutputPathService.obtenerRutaPorDefecto()}\\${out.fileName}`,
+          fullPath: rutaOrigenDirectorio
+            ? `${rutaOrigenDirectorio}/${out.fileName}`.replace(/\//g, '\\')
+            : `${OutputPathService.obtenerRutaPorDefecto()}\\${out.fileName}`,
         }));
 
         if (typeof window !== 'undefined' && (window as any).__TAURI__?.invoke) {
@@ -180,14 +300,18 @@ export default function StreamlinedTranscriptionView(): React.ReactElement {
                   ruta: out.fullPath,
                   contenido: resultadoAudio.txtContent,
                 });
-              } catch {}
+              } catch (writeErr) {
+                console.warn('Aviso guardado texto:', writeErr);
+              }
             } else if (out.format === 'srt' && resultadoAudio.srtContent && out.fullPath) {
               try {
                 await tauri.invoke('guardar_archivo_texto', {
                   ruta: out.fullPath,
                   contenido: resultadoAudio.srtContent,
                 });
-              } catch {}
+              } catch (writeErr) {
+                console.warn('Aviso guardado srt:', writeErr);
+              }
             }
           }
         }
@@ -198,7 +322,7 @@ export default function StreamlinedTranscriptionView(): React.ReactElement {
           fileSizeFormatted: `${(file.size / (1024 * 1024)).toFixed(1)} MB`,
           modelUsed: WHISPER_MODELS[modelo]?.nombreVisible || modelo,
           language: idioma === 'auto' ? 'Detección automática' : idioma.toUpperCase(),
-          destinationType: 'default',
+          destinationType: rutaOrigenDirectorio ? 'original' : 'default',
           destinationFolder: carpetaDestino,
           outputs: salidasBD,
           status: statusFinal,
@@ -219,24 +343,51 @@ export default function StreamlinedTranscriptionView(): React.ReactElement {
     } catch (err: any) {
       console.error('Error durante la transcripción en vista ágil:', err);
       const msg = err?.message || String(err);
+      setErrorMensaje(msg);
       if (typeof window !== 'undefined' && (window as any).__TAURI__?.invoke) {
         try {
           (window as any).__TAURI__.invoke('registrar_error_log', {
             componente: 'StreamlinedTranscriptionView',
             mensaje: msg,
             contexto: navigator.userAgent,
-            rutaAudio: archivos.length > 0 ? (archivos[0] as any).path || archivos[0].name : null,
+            rutaAudio: archivos.length > 0 ? (archivos[0] as any).path || (archivos[0] as any).__tauriPath || archivos[0].name : null,
           });
         } catch {}
       }
       setTelemetria((prev) => ({
         ...prev,
+        porcentaje: 0,
         mensaje: `❌ Error en transcripción: ${msg}`,
       }));
     } finally {
       setEnEjecucion(false);
       setCancelando(false);
-      setUltimasTranscripciones(TranscriptionDatabase.obtenerTodas().slice(0, 5));
+
+      if (!cancelacionSolicitada.current) {
+        setTelemetria((prev) => {
+          if (prev.mensaje.startsWith('❌')) return prev;
+          return {
+            ...prev,
+            porcentaje: 100,
+            mensaje: '✅ Transcripción completada con éxito.',
+          };
+        });
+        setTranscripcionCompletada(true);
+        setTimeout(() => {
+          setTranscripcionCompletada(false);
+          setUltimasTranscripciones(TranscriptionDatabase.obtenerTodas().slice(0, 5));
+        }, 3500);
+      } else {
+        setTelemetria((prev) => ({
+          ...prev,
+          mensaje: '⏹ Transcripción cancelada — expediente parcial rescatado y guardado.',
+        }));
+        setTranscripcionCompletada(true);
+        setTimeout(() => {
+          setTranscripcionCompletada(false);
+          setUltimasTranscripciones(TranscriptionDatabase.obtenerTodas().slice(0, 5));
+        }, 3500);
+      }
     }
   };
 
@@ -533,27 +684,34 @@ export default function StreamlinedTranscriptionView(): React.ReactElement {
           Formatos compatibles: MP3, WAV, M4A, OGG, FLAC, MP4, MKV, AVI, WEBM
         </p>
 
-        <label
+        <button
+          type="button"
+          onClick={handleExaminarArchivos}
+          disabled={enEjecucion}
           style={{
             display: 'inline-block',
-            backgroundColor: THEME_TOKENS.colors.accentPrimary,
+            backgroundColor: enEjecucion ? '#94A3B8' : THEME_TOKENS.colors.accentPrimary,
             color: '#FFFFFF',
-            padding: '0.55rem 1.25rem',
+            padding: '0.65rem 1.5rem',
             borderRadius: THEME_TOKENS.radii.sm,
-            fontSize: '0.85rem',
+            fontSize: '0.875rem',
             fontWeight: 600,
-            cursor: 'pointer',
+            border: 'none',
+            cursor: enEjecucion ? 'not-allowed' : 'pointer',
+            boxShadow: THEME_TOKENS.shadows.sm,
+            transition: 'background-color 0.2s ease',
           }}
         >
           📂 Seleccionar Archivos
-          <input
-            type="file"
-            multiple
-            accept="audio/*,video/*"
-            onChange={handleSeleccionarArchivos}
-            style={{ display: 'none' }}
-          />
-        </label>
+        </button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          accept="audio/*,video/*"
+          onChange={handleSeleccionarArchivos}
+          style={{ display: 'none' }}
+        />
 
         {archivos.length > 0 && (
           <div style={{ marginTop: '1.25rem', textAlign: 'left', backgroundColor: THEME_TOKENS.colors.surfaceBase, padding: '0.75rem 1rem', borderRadius: THEME_TOKENS.radii.sm, border: `1px solid ${THEME_TOKENS.colors.borderSubtle}` }}>
@@ -569,8 +727,19 @@ export default function StreamlinedTranscriptionView(): React.ReactElement {
             </div>
             <ul style={{ margin: 0, paddingLeft: '1.25rem', fontSize: '0.8rem', color: THEME_TOKENS.colors.textSecondary }}>
               {archivos.map((f, idx) => (
-                <li key={idx} style={{ marginBottom: '0.2rem' }}>
-                  {f.name} ({(f.size / (1024 * 1024)).toFixed(2)} MB)
+                <li key={idx} style={{ marginBottom: '0.25rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span title={(f as any).__tauriPath || (f as any).path || f.name} style={{ textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap', maxWidth: '650px' }}>
+                    🎵 {f.name} {f.size > 0 ? `(${(f.size / (1024 * 1024)).toFixed(2)} MB)` : ''}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setArchivos((prev) => prev.filter((_, i) => i !== idx))}
+                    disabled={enEjecucion}
+                    title="Quitar este archivo de la cola"
+                    style={{ background: 'none', border: 'none', color: '#94A3B8', cursor: 'pointer', fontSize: '0.8rem', padding: '0 0.35rem' }}
+                  >
+                    ✕
+                  </button>
                 </li>
               ))}
             </ul>
@@ -578,10 +747,76 @@ export default function StreamlinedTranscriptionView(): React.ReactElement {
         )}
       </div>
 
+      {/* Alerta de Error Visible y Persistente */}
+      {errorMensaje && (
+        <div
+          style={{
+            backgroundColor: 'rgba(239, 68, 68, 0.08)',
+            border: '1px solid rgba(239, 68, 68, 0.35)',
+            borderRadius: THEME_TOKENS.radii.md,
+            padding: '1rem 1.25rem',
+            marginBottom: '1.5rem',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            gap: '1rem',
+            boxShadow: THEME_TOKENS.shadows.sm,
+          }}
+        >
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
+              <span style={{ fontSize: '1rem' }}>⚠️</span>
+              <strong style={{ fontSize: '0.875rem', color: '#DC2626' }}>
+                Atención: Fallo en el proceso de transcripción
+              </strong>
+            </div>
+            <p style={{ margin: 0, fontSize: '0.8125rem', color: THEME_TOKENS.colors.textPrimary, wordBreak: 'break-word' }}>
+              {errorMensaje}
+            </p>
+          </div>
+          <div style={{ display: 'flex', gap: '0.5rem', flexShrink: 0 }}>
+            <button
+              type="button"
+              onClick={handleAbrirCarpetaLogs}
+              title="Abrir carpeta de registros técnicos"
+              style={{
+                backgroundColor: 'rgba(239, 68, 68, 0.15)',
+                color: '#DC2626',
+                border: '1px solid rgba(239, 68, 68, 0.3)',
+                borderRadius: THEME_TOKENS.radii.sm,
+                padding: '0.35rem 0.75rem',
+                fontSize: '0.75rem',
+                fontWeight: 600,
+                cursor: 'pointer',
+              }}
+            >
+              📋 Ver Logs
+            </button>
+            <button
+              type="button"
+              onClick={() => setErrorMensaje(null)}
+              title="Cerrar este aviso"
+              style={{
+                backgroundColor: 'transparent',
+                color: THEME_TOKENS.colors.textMuted,
+                border: `1px solid ${THEME_TOKENS.colors.borderSubtle}`,
+                borderRadius: THEME_TOKENS.radii.sm,
+                padding: '0.35rem 0.65rem',
+                fontSize: '0.75rem',
+                cursor: 'pointer',
+              }}
+            >
+              ✕ Cerrar
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Barra de Progreso y Telemetría en Vivo */}
-      {enEjecucion && (
+      {(enEjecucion || transcripcionCompletada) && (
         <div style={{ marginBottom: '1.5rem' }}>
           <TranscriptionProgressBar
+            key={enEjecucion ? 'activa' : 'completada'}
             porcentaje={telemetria.porcentaje}
             etapaActual={telemetria.etapaActual}
             totalEtapas={telemetria.totalEtapas}
@@ -591,7 +826,7 @@ export default function StreamlinedTranscriptionView(): React.ReactElement {
             segundosProcesadosAudio={telemetria.segundosProcesadosAudio}
             totalSegundosAudio={telemetria.totalSegundosAudio}
             nombreArchivo={telemetria.nombreArchivo}
-            enCancelar={handleCancelar}
+            enCancelar={enEjecucion ? handleCancelar : undefined}
             cancelando={cancelando}
           />
         </div>

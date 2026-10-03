@@ -746,7 +746,18 @@ export default function ClassicTranscriptionView(): React.ReactElement {
     } finally {
       setIsRunning(false);
       setIsCanceling(false);
-      cancelacionSolicitada.current = false;
+      setTelemetriaActual((prev) => ({
+        ...prev,
+        porcentaje: cancelacionSolicitada.current ? prev.porcentaje : 100,
+        mensaje: cancelacionSolicitada.current
+          ? '⏹ Transcripción cancelada — expediente parcial rescatado.'
+          : prev.mensaje.startsWith('❌')
+          ? prev.mensaje
+          : '✅ Transcripción completada con éxito.',
+      }));
+      setTimeout(() => {
+        cancelacionSolicitada.current = false;
+      }, 2500);
     }
   };
 

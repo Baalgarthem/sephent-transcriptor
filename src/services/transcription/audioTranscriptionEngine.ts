@@ -273,6 +273,10 @@ export class AudioTranscriptionEngine {
     errorMotivo?: string
   ): string {
     const lineas: string[] = [];
+    const safeSpeakerNames: Record<string, string> = (speakerNames && Object.keys(speakerNames).length > 0)
+      ? speakerNames
+      : { speaker_01: 'Persona 1' };
+
     if (isPartial) {
       lineas.push('================================================================================');
       lineas.push('        TRANSCRIPCIÓN DE AUDIO/VIDEO [EXPEDIENTE PARCIAL RESCATADO]');
@@ -285,7 +289,7 @@ export class AudioTranscriptionEngine {
       lineas.push(`Modelo Utilizado:     ${modelo}`);
       lineas.push(`Idioma:               ${idioma.toUpperCase()}`);
       lineas.push(`Fecha de Proceso:     ${new Date().toLocaleString('es-ES')}`);
-      lineas.push(`Hablantes Detectados: ${Object.values(speakerNames).join(', ')}`);
+      lineas.push(`Hablantes Detectados: ${Object.values(safeSpeakerNames).join(', ')}`);
       lineas.push('Nota Pericial:        Se preservan con integridad forense todos los segmentos');
       lineas.push('                      acústicos decodificados hasta el momento de la interrupción.');
       lineas.push('================================================================================\n');
@@ -297,12 +301,12 @@ export class AudioTranscriptionEngine {
       lineas.push(`Modelo Utilizado:     ${modelo}`);
       lineas.push(`Idioma:               ${idioma.toUpperCase()}`);
       lineas.push(`Fecha de Proceso:     ${new Date().toLocaleString('es-ES')}`);
-      lineas.push(`Hablantes Detectados: ${Object.values(speakerNames).join(', ')}`);
+      lineas.push(`Hablantes Detectados: ${Object.values(safeSpeakerNames).join(', ')}`);
       lineas.push('================================================================================\n');
     }
 
     for (const seg of segmentos) {
-      const nombre = speakerNames[seg.speakerId] || seg.speakerId;
+      const nombre = safeSpeakerNames[seg.speakerId] || seg.speakerId || 'Persona 1';
       const tInicio = this.formatearSegundos(seg.startTime);
       const tFin = this.formatearSegundos(seg.endTime);
       const textoNormalizado = this.corregirPuntuacionYOrtografia(seg.text, idioma);
@@ -319,9 +323,12 @@ export class AudioTranscriptionEngine {
     idioma: string = 'es'
   ): string {
     const bloques: string[] = [];
+    const safeSpeakerNames: Record<string, string> = (speakerNames && Object.keys(speakerNames).length > 0)
+      ? speakerNames
+      : { speaker_01: 'Persona 1' };
 
     segmentos.forEach((seg, idx) => {
-      const nombre = speakerNames[seg.speakerId] || seg.speakerId;
+      const nombre = safeSpeakerNames[seg.speakerId] || seg.speakerId || 'Persona 1';
       const textoNormalizado = this.corregirPuntuacionYOrtografia(seg.text, idioma);
       bloques.push(String(idx + 1));
       bloques.push(`${this.formatearSegundosSRT(seg.startTime)} --> ${this.formatearSegundosSRT(seg.endTime)}`);

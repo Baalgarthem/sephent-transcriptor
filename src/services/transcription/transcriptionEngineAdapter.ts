@@ -26,19 +26,23 @@ export class TranscriptionEngineAdapter implements ITranscriptionEngine {
     const onProgresoInterno = (porcentaje: number, mensaje: string, extra?: any) => {
       if (opciones.onProgreso) {
         const transcurrido = Math.max(0.1, (Date.now() - inicioMs) / 1000);
+
+        // Etapa actual: preferir la del engine (Rust), si no, inferir por porcentaje
         let etapa = extra?.etapaActual;
-        if (!etapa) {
+        if (!etapa || typeof etapa !== 'number') {
           if (porcentaje < 20) etapa = 1;
           else if (porcentaje < 70) etapa = 2;
           else if (porcentaje < 90) etapa = 3;
           else etapa = 4;
         }
 
+        // ETA: preferir la del engine (Rust), si no, calcular con interpolación lineal
         let eta = extra?.tiempoEstimadoSegundos;
-        if (eta === undefined || eta === null) {
-          if (porcentaje > 5 && porcentaje < 100) {
+        if (eta === undefined || eta === null || !isFinite(eta)) {
+          if (porcentaje > 2 && porcentaje < 100) {
             const totalEst = transcurrido / (porcentaje / 100);
-            eta = Math.max(0, totalEst - transcurrido);
+            const etaRaw = totalEst - transcurrido;
+            eta = isFinite(etaRaw) && etaRaw >= 0 ? etaRaw : 0;
           } else {
             eta = 0;
           }
@@ -51,7 +55,9 @@ export class TranscriptionEngineAdapter implements ITranscriptionEngine {
           mensaje,
           tiempoTranscurridoSegundos: Math.round(transcurrido),
           tiempoEstimadoSegundos: Math.round(eta),
-          velocidadFactor: extra?.velocidadFactor || 1.0,
+          velocidadFactor: (extra?.velocidadFactor && extra.velocidadFactor > 0)
+            ? extra.velocidadFactor
+            : 1.0,
           segundosProcesadosAudio: extra?.segundosProcesadosAudio,
           totalSegundosAudio: extra?.totalSegundosAudio,
         };
