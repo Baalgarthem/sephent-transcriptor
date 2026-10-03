@@ -1392,18 +1392,20 @@ export const ReviewerWorkspaceModal: React.FC<ReviewerWorkspaceModalProps> = ({
               </div>
             )}
 
-            {/* Fichas Didácticas de Hablantes */}
-            <SpeakerManagerBar
-              speakers={dossier.speakers}
-              intervencionesPorHablante={intervencionesPorHablante}
-              muestrasPorHablante={muestrasPorHablante}
-              audioUrl={audioUrlActivo}
-              onRenombrarHablante={handleRenombrarHablante}
-              onAsignarRol={handleAsignarRolHablante}
-              onAgregarHablante={handleAgregarHablante}
-              mostrarRolEnNombre={dossier.mostrarRolEnNombre || false}
-              onToggleMostrarRolEnNombre={handleToggleMostrarRolEnNombre}
-            />
+            {/* Fichas Didácticas de Hablantes (solo cuando hay diarización / interlocutores identificados) */}
+            {Object.keys(dossier.speakers).length > 0 && (
+              <SpeakerManagerBar
+                speakers={dossier.speakers}
+                intervencionesPorHablante={intervencionesPorHablante}
+                muestrasPorHablante={muestrasPorHablante}
+                audioUrl={audioUrlActivo}
+                onRenombrarHablante={handleRenombrarHablante}
+                onAsignarRol={handleAsignarRolHablante}
+                onAgregarHablante={handleAgregarHablante}
+                mostrarRolEnNombre={dossier.mostrarRolEnNombre || false}
+                onToggleMostrarRolEnNombre={handleToggleMostrarRolEnNombre}
+              />
+            )}
 
             {/* Barra de Filtro y Búsqueda en los Diálogos */}
             <div
@@ -1445,26 +1447,28 @@ export const ReviewerWorkspaceModal: React.FC<ReviewerWorkspaceModalProps> = ({
                   }}
                 />
 
-                <select
-                  value={filtroHablante}
-                  onChange={(e) => setFiltroHablante(e.target.value)}
-                  style={{
-                    padding: '0.45rem 0.75rem',
-                    borderRadius: THEME_TOKENS.radii.xs,
-                    border: `1px solid ${THEME_TOKENS.colors.borderStrong}`,
-                    fontSize: '0.8125rem',
-                    backgroundColor: THEME_TOKENS.colors.surfaceBase,
-                    outline: 'none',
-                    cursor: 'pointer',
-                  }}
-                >
-                  <option value="todos">Todos los hablantes</option>
-                  {Object.values(dossier.speakers).map((s) => (
-                    <option key={s.speakerId} value={s.speakerId}>
-                      {s.displayName} ({s.speakerId})
-                    </option>
-                  ))}
-                </select>
+                {Object.keys(dossier.speakers).length > 0 && (
+                  <select
+                    value={filtroHablante}
+                    onChange={(e) => setFiltroHablante(e.target.value)}
+                    style={{
+                      padding: '0.45rem 0.75rem',
+                      borderRadius: THEME_TOKENS.radii.xs,
+                      border: `1px solid ${THEME_TOKENS.colors.borderStrong}`,
+                      fontSize: '0.8125rem',
+                      backgroundColor: THEME_TOKENS.colors.surfaceBase,
+                      outline: 'none',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <option value="todos">Todos los hablantes</option>
+                    {Object.values(dossier.speakers).map((s) => (
+                      <option key={s.speakerId} value={s.speakerId}>
+                        {s.displayName} ({s.speakerId})
+                      </option>
+                    ))}
+                  </select>
+                )}
               </div>
 
               <span style={{ fontSize: '0.75rem', color: THEME_TOKENS.colors.textSecondary }}>

@@ -84,32 +84,34 @@ export const SegmentBlockItem: React.FC<SegmentBlockItemProps> = ({
             />
           )}
 
-          {/* Badge del Hablante */}
-          <span
-            style={{
-              backgroundColor: bgHablante,
-              color: colorHablante,
-              border: `1px solid ${borderHablante}`,
-              padding: '0.2rem 0.6rem',
-              borderRadius: THEME_TOKENS.radii.xs,
-              fontSize: '0.8125rem',
-              fontWeight: 700,
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '0.35rem',
-            }}
-          >
+          {/* Badge del Hablante (solo si hay diarización activa con nombre asignado) */}
+          {block.speakerName && block.speakerName.trim() ? (
             <span
               style={{
-                width: '8px',
-                height: '8px',
-                borderRadius: '50%',
-                backgroundColor: colorHablante,
-                display: 'inline-block',
+                backgroundColor: bgHablante,
+                color: colorHablante,
+                border: `1px solid ${borderHablante}`,
+                padding: '0.2rem 0.6rem',
+                borderRadius: THEME_TOKENS.radii.xs,
+                fontSize: '0.8125rem',
+                fontWeight: 700,
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.35rem',
               }}
-            />
-            {block.speakerName}
-          </span>
+            >
+              <span
+                style={{
+                  width: '8px',
+                  height: '8px',
+                  borderRadius: '50%',
+                  backgroundColor: colorHablante,
+                  display: 'inline-block',
+                }}
+              />
+              {block.speakerName}
+            </span>
+          ) : null}
 
           {/* Timestamps Legibles [00:14:22 - 00:14:29] */}
           <span

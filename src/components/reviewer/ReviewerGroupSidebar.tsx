@@ -479,30 +479,30 @@ const TranscriptionDragCard: React.FC<DragCardProps> = ({
         </span>
       </div>
 
-      {/* Nivel 3: Subsección de Personas de esta Transcripción */}
-      <div
-        style={{
-          borderTop: `1px solid ${estaActiva ? 'rgba(255,255,255,0.15)' : THEME_TOKENS.colors.borderSubtle}`,
-          paddingTop: '0.3rem',
-          marginTop: '0.1rem',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '0.2rem',
-        }}
-      >
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <span
-            style={{
-              fontSize: '0.65rem',
-              color: estaActiva ? 'rgba(255,255,255,0.8)' : THEME_TOKENS.colors.textSecondary,
-              fontWeight: 600,
-            }}
-          >
-            👥 Personas ({personas.length > 0 ? personas.length : 'detectadas'}):
-          </span>
-        </div>
+      {/* Nivel 3: Subsección de Personas de esta Transcripción (solo si hay personas identificadas) */}
+      {personas.length > 0 && (
+        <div
+          style={{
+            borderTop: `1px solid ${estaActiva ? 'rgba(255,255,255,0.15)' : THEME_TOKENS.colors.borderSubtle}`,
+            paddingTop: '0.3rem',
+            marginTop: '0.1rem',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '0.2rem',
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span
+              style={{
+                fontSize: '0.65rem',
+                color: estaActiva ? 'rgba(255,255,255,0.8)' : THEME_TOKENS.colors.textSecondary,
+                fontWeight: 600,
+              }}
+            >
+              👥 Personas ({personas.length}):
+            </span>
+          </div>
 
-        {personas.length > 0 ? (
           <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap' }}>
             {personas.map(([spkId, nombre]) => (
               <span
@@ -521,18 +521,8 @@ const TranscriptionDragCard: React.FC<DragCardProps> = ({
               </span>
             ))}
           </div>
-        ) : (
-          <span
-            style={{
-              fontSize: '0.625rem',
-              color: estaActiva ? 'rgba(255,255,255,0.6)' : THEME_TOKENS.colors.textMuted,
-              fontStyle: 'italic',
-            }}
-          >
-            Haz clic para abrir y escuchar sus muestras de voz
-          </span>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 };

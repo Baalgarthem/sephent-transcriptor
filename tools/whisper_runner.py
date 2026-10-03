@@ -1126,7 +1126,7 @@ def normalizar_audio_amplitud(audio_np: np.ndarray, target_peak: float = 0.95) -
     return audio_np
 
 
-def guardar_transcripcion_parcial(ruta_parcial: str, segs_raw: list, idioma: str, modelo: str, duracion_total: float):
+def guardar_transcripcion_parcial(ruta_parcial: str, segs_raw: list, idioma: str, modelo: str, duracion_total: float, diarize: bool = False):
     """
     Guarda en disco de forma atómica la transcripción parcial acumulada hasta el momento actual.
     Permite recuperar el trabajo transcrito si el usuario cancela o si ocurre un fallo fortuito.
@@ -1143,7 +1143,7 @@ def guardar_transcripcion_parcial(ruta_parcial: str, segs_raw: list, idioma: str
             texto_p = corregir_puntuacion_y_ortografia(s.get("text", ""), idioma=idioma)
             segs_formateados.append({
                 "id": f"seg_{i + 1}",
-                "speakerId": "speaker_01",
+                "speakerId": "speaker_01" if diarize else "",
                 "startTime": t_start,
                 "endTime": t_end,
                 "text": texto_p,
@@ -1152,14 +1152,16 @@ def guardar_transcripcion_parcial(ruta_parcial: str, segs_raw: list, idioma: str
 
         dur_actual = segs_formateados[-1]["endTime"] if segs_formateados else 0.0
 
+        speaker_names = {"speaker_01": "Persona 1"} if diarize else {}
+
         datos = {
             "segments": segs_formateados,
-            "speakerNames": {"speaker_01": "Persona 1"},
+            "speakerNames": speaker_names,
             "durationSeconds": dur_actual,
             "totalAudioSeconds": round(duracion_total, 3),
             "modelUsed": modelo,
             "language": idioma,
-            "numSpeakers": 1,
+            "numSpeakers": len(speaker_names),
             "isPartial": True,
             "status": "parcial"
         }
@@ -1423,7 +1425,8 @@ def transcribir(file_path: str, model_name: str, language: str,
                                 live_segs,
                                 caller_frame.f_locals.get("language", language_usado),
                                 resolved_model,
-                                audio_duration
+                                audio_duration,
+                                diarize=diarize
                             )
                     except Exception:
                         pass
@@ -1562,7 +1565,7 @@ def transcribir(file_path: str, model_name: str, language: str,
             texto_pulido = corregir_puntuacion_y_ortografia(seg.get("text", ""), idioma=detected_language)
             output_segments.append({
                 "id": f"seg_{i + 1}",
-                "speakerId": "speaker_01",
+                "speakerId": "",
                 "startTime": start_t,
                 "endTime": end_t,
                 "text": texto_pulido,
@@ -1571,11 +1574,11 @@ def transcribir(file_path: str, model_name: str, language: str,
 
         return {
             "segments": output_segments,
-            "speakerNames": {"speaker_01": "Persona 1"},
+            "speakerNames": {},
             "durationSeconds": round(duration, 3),
             "modelUsed": resolved_model,
             "language": detected_language,
-            "numSpeakers": 1,
+            "numSpeakers": 0,
         }
 
     # ── ETAPA 3/4: Diarización de interlocutores ──────────────────────────────

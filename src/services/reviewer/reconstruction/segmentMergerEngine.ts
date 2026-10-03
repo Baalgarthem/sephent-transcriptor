@@ -103,8 +103,10 @@ export class SegmentMergerEngine {
     const startTime = primerSeg.startTime;
     const endTime = ultimoSeg.endTime;
 
-    const speakerId = primerSeg.speakerId;
-    const speakerName = nombresHablantes[speakerId] || `Persona ${speakerId.replace(/\D/g, '') || '1'}`;
+    const speakerId = primerSeg.speakerId || '';
+    const speakerName = speakerId.trim()
+      ? (nombresHablantes[speakerId] || `Persona ${speakerId.replace(/\D/g, '') || '1'}`)
+      : '';
 
     // Concatenar texto original preservando espaciado limpio
     const originalText = segmentos

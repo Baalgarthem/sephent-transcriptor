@@ -97,6 +97,22 @@ async function ejecutarPruebasAudioTranscriptionEngine() {
 
   afirmar(resultadoAudio.srtContent.includes('-->'), 'El .srt contiene delimitadores canónicos de tiempo "-->"');
   afirmar(resultadoAudio.srtContent.includes('00:00:'), 'El .srt incluye formato horario HH:MM:SS,mmm');
+  afirmar(resultadoAudio.srtContent.includes('<b>Persona 1:</b>'), 'El .srt incluye etiqueta de interlocutor cuando hay diarización');
+
+  // 2.1 Validación estricta: SIN diarización NO debe marcarse "Persona 1, 2, etc"
+  console.log('\n🚫 2.1 Validación sin diarización (cero marcas de "Persona 1, 2, etc")...');
+  const resultadoSinDiarizar = await AudioTranscriptionEngine.procesarArchivo(archivoAudioPrueba, {
+    model: 'medium',
+    language: 'es',
+    diarizar: false,
+  });
+
+  afirmar(Object.keys(resultadoSinDiarizar.speakerNames).length === 0, 'No asigna ningún speakerNames cuando diarizar es false');
+  afirmar(!resultadoSinDiarizar.txtContent.includes('Persona 1'), 'El .txt NO incluye "Persona 1" cuando la diarización está desactivada');
+  afirmar(!resultadoSinDiarizar.txtContent.includes('Persona 2'), 'El .txt NO incluye "Persona 2" cuando la diarización está desactivada');
+  afirmar(resultadoSinDiarizar.txtContent.includes('Diarización:          Desactivada'), 'El encabezado .txt indica diarización desactivada');
+  afirmar(!resultadoSinDiarizar.srtContent.includes('Persona 1'), 'El .srt NO incluye "Persona 1" cuando la diarización está desactivada');
+  afirmar(!resultadoSinDiarizar.srtContent.includes('<b>'), 'El .srt no inyecta etiquetas de locutor en negrita sin diarización');
 
   // 3. Estrategias de salida con contenido real (Blobs)
   console.log('\n📦 3. Estrategias de salida con contenido real (FormatStrategies)...');

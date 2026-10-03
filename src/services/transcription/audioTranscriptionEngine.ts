@@ -102,9 +102,10 @@ export class AudioTranscriptionEngine {
         const txtContent = this.generarTextoPlano(
           file.name, opciones.model, resultado.language,
           finalSegments, resultado.speakerNames,
-          resultado.isPartial, resultado.wasCancelled, resultado.errorMotivo
+          resultado.isPartial, resultado.wasCancelled, resultado.errorMotivo,
+          diarizar
         );
-        const srtContent = this.generarSubtitulosSrt(finalSegments, resultado.speakerNames);
+        const srtContent = this.generarSubtitulosSrt(finalSegments, resultado.speakerNames, resultado.language, diarizar);
 
         if (onProgreso) {
           if (resultado.isPartial) {
@@ -145,8 +146,8 @@ export class AudioTranscriptionEngine {
 
     if (onProgreso) onProgreso(40, `Etapa 2 de ${totalEtapas}: Analizando actividad vocal y decodificando (${duracion.toFixed(1)}s)...`);
 
-    // En tests o navegador puro: único hablante base
-    let segmentos = this.estimarSegmentosMonologo(file.name, duracion, opciones.language);
+    // En tests o navegador puro: si diarizar está activo asignar speaker_01, si no ninguno
+    let segmentos = this.estimarSegmentosMonologo(file.name, duracion, opciones.language, diarizar);
     if (evitarTruncamiento && duracion > 0) {
       const antiTrunc = (typeof appContainer !== 'undefined' && appContainer?.has(DI_TOKENS.ANTI_TRUNCATION))
         ? appContainer.resolve<IAntiTruncationService>(DI_TOKENS.ANTI_TRUNCATION)
@@ -163,14 +164,14 @@ export class AudioTranscriptionEngine {
         }
       }
     }
-    const speakerNames: Record<string, string> = { speaker_01: 'Persona 1' };
+    const speakerNames: Record<string, string> = diarizar ? { speaker_01: 'Persona 1' } : {};
 
     if (diarizar) {
       if (onProgreso) onProgreso(75, 'Etapa 3 de 4: Discriminando hablantes y estructurando turnos...');
     }
 
-    const txtContent = this.generarTextoPlano(file.name, opciones.model, opciones.language, segmentos, speakerNames);
-    const srtContent = this.generarSubtitulosSrt(segmentos, speakerNames);
+    const txtContent = this.generarTextoPlano(file.name, opciones.model, opciones.language, segmentos, speakerNames, false, false, undefined, diarizar);
+    const srtContent = this.generarSubtitulosSrt(segmentos, speakerNames, opciones.language, diarizar);
 
     if (onProgreso) onProgreso(95, `Etapa ${totalEtapas} de ${totalEtapas}: Generando formatos documentales (.txt, .srt)...`);
 
@@ -240,7 +241,8 @@ export class AudioTranscriptionEngine {
   public static estimarSegmentosMonologo(
     nombreArchivo: string,
     duracionTotal: number,
-    idioma: string
+    idioma: string,
+    diarizar: boolean = true
   ): RawTranscriptSegment[] {
     const segmentos: RawTranscriptSegment[] = [];
     const duracionPromedioTurno = 6.0;
@@ -255,7 +257,7 @@ export class AudioTranscriptionEngine {
 
       segmentos.push({
         id: `seg_${i + 1}`,
-        speakerId: 'speaker_01',
+        speakerId: diarizar ? 'speaker_01' : '',
         startTime,
         endTime: tiempoFin,
         text: `Intervención acústica ${i + 1} [${startTime.toFixed(1)}s - ${tiempoFin.toFixed(1)}s]`,
@@ -275,15 +277,19 @@ export class AudioTranscriptionEngine {
     modelo: string,
     idioma: string,
     segmentos: RawTranscriptSegment[],
-    speakerNames: Record<string, string>,
+    speakerNames?: Record<string, string>,
     isPartial: boolean = false,
     wasCancelled: boolean = false,
-    errorMotivo?: string
+    errorMotivo?: string,
+    diarizar?: boolean
   ): string {
     const lineas: string[] = [];
-    const safeSpeakerNames: Record<string, string> = (speakerNames && Object.keys(speakerNames).length > 0)
-      ? speakerNames
-      : { speaker_01: 'Persona 1' };
+    const tieneDiarizacion = Boolean(
+      (diarizar !== undefined ? diarizar : (speakerNames && Object.keys(speakerNames).length > 0)) &&
+      speakerNames &&
+      Object.keys(speakerNames).length > 0
+    );
+    const safeSpeakerNames: Record<string, string> = speakerNames || {};
 
     if (isPartial) {
       lineas.push('================================================================================');
@@ -297,7 +303,11 @@ export class AudioTranscriptionEngine {
       lineas.push(`Modelo Utilizado:     ${modelo}`);
       lineas.push(`Idioma:               ${(idioma || 'auto').toUpperCase()}`);
       lineas.push(`Fecha de Proceso:     ${new Date().toLocaleString('es-ES')}`);
-      lineas.push(`Hablantes Detectados: ${Object.values(safeSpeakerNames).join(', ')}`);
+      if (tieneDiarizacion) {
+        lineas.push(`Hablantes Detectados: ${Object.values(safeSpeakerNames).join(', ')}`);
+      } else {
+        lineas.push('Diarización:          Desactivada (transcripción continua)');
+      }
       lineas.push('Nota Pericial:        Se preservan con integridad forense todos los segmentos');
       lineas.push('                      acústicos decodificados hasta el momento de la interrupción.');
       lineas.push('================================================================================\n');
@@ -309,16 +319,24 @@ export class AudioTranscriptionEngine {
       lineas.push(`Modelo Utilizado:     ${modelo}`);
       lineas.push(`Idioma:               ${(idioma || 'auto').toUpperCase()}`);
       lineas.push(`Fecha de Proceso:     ${new Date().toLocaleString('es-ES')}`);
-      lineas.push(`Hablantes Detectados: ${Object.values(safeSpeakerNames).join(', ')}`);
+      if (tieneDiarizacion) {
+        lineas.push(`Hablantes Detectados: ${Object.values(safeSpeakerNames).join(', ')}`);
+      } else {
+        lineas.push('Diarización:          Desactivada (transcripción continua)');
+      }
       lineas.push('================================================================================\n');
     }
 
     for (const seg of segmentos) {
-      const nombre = safeSpeakerNames[seg.speakerId] || seg.speakerId || 'Persona 1';
       const tInicio = this.formatearSegundos(seg.startTime);
       const tFin = this.formatearSegundos(seg.endTime);
       const textoNormalizado = this.corregirPuntuacionYOrtografia(seg.text, idioma);
-      lineas.push(`[${tInicio} - ${tFin}] ${nombre}:`);
+      if (tieneDiarizacion && seg.speakerId && (safeSpeakerNames[seg.speakerId] || seg.speakerId)) {
+        const nombre = safeSpeakerNames[seg.speakerId] || seg.speakerId;
+        lineas.push(`[${tInicio} - ${tFin}] ${nombre}:`);
+      } else {
+        lineas.push(`[${tInicio} - ${tFin}]:`);
+      }
       lineas.push(`    "${textoNormalizado}"\n`);
     }
 
@@ -327,20 +345,28 @@ export class AudioTranscriptionEngine {
 
   public static generarSubtitulosSrt(
     segmentos: RawTranscriptSegment[],
-    speakerNames: Record<string, string>,
-    idioma: string = 'es'
+    speakerNames?: Record<string, string>,
+    idioma: string = 'es',
+    diarizar?: boolean
   ): string {
     const bloques: string[] = [];
-    const safeSpeakerNames: Record<string, string> = (speakerNames && Object.keys(speakerNames).length > 0)
-      ? speakerNames
-      : { speaker_01: 'Persona 1' };
+    const tieneDiarizacion = Boolean(
+      (diarizar !== undefined ? diarizar : (speakerNames && Object.keys(speakerNames).length > 0)) &&
+      speakerNames &&
+      Object.keys(speakerNames).length > 0
+    );
+    const safeSpeakerNames: Record<string, string> = speakerNames || {};
 
     segmentos.forEach((seg, idx) => {
-      const nombre = safeSpeakerNames[seg.speakerId] || seg.speakerId || 'Persona 1';
       const textoNormalizado = this.corregirPuntuacionYOrtografia(seg.text, idioma);
       bloques.push(String(idx + 1));
       bloques.push(`${this.formatearSegundosSRT(seg.startTime)} --> ${this.formatearSegundosSRT(seg.endTime)}`);
-      bloques.push(`<b>${nombre}:</b> ${textoNormalizado}`);
+      if (tieneDiarizacion && seg.speakerId && (safeSpeakerNames[seg.speakerId] || seg.speakerId)) {
+        const nombre = safeSpeakerNames[seg.speakerId] || seg.speakerId;
+        bloques.push(`<b>${nombre}:</b> ${textoNormalizado}`);
+      } else {
+        bloques.push(textoNormalizado);
+      }
       bloques.push('');
     });
 

@@ -35,13 +35,15 @@ export class TranscriptionReviewerService {
   }): TranscriptionReviewDossier {
     const id = `DOSSIER-${Date.now()}-${Math.random().toString(36).substring(2, 7).toUpperCase()}`;
 
-    // 1. Inicializar registro de hablantes
+    // 1. Inicializar registro de hablantes (solo si hay interlocutores identificados)
     const registry = new SpeakerRegistry();
     for (const seg of datos.rawSegments) {
-      registry.registrarODescubrirHablante(
-        seg.speakerId,
-        datos.nombresInicialesHablantes?.[seg.speakerId]
-      );
+      if (seg.speakerId && seg.speakerId.trim()) {
+        registry.registrarODescubrirHablante(
+          seg.speakerId,
+          datos.nombresInicialesHablantes?.[seg.speakerId]
+        );
+      }
     }
 
     const mapaNombres = registry.obtenerMapaNombres();
@@ -192,7 +194,7 @@ export class TranscriptionReviewerService {
   } {
     const speakers = Object.values(dossier.speakers || {});
     if (speakers.length === 0) {
-      return { todasIdentificadas: false, total: 0, identificadas: 0, pendientes: ['Sin interlocutores registrados'] };
+      return { todasIdentificadas: true, total: 0, identificadas: 0, pendientes: [] };
     }
 
     const pendientes: string[] = [];
@@ -538,7 +540,9 @@ export class TranscriptionReviewerService {
       const tiempoInicio = this.formatearSegundos(b.startTime);
       const tiempoFin = this.formatearSegundos(b.endTime);
 
-      lineas.push(`${b.speakerName}`);
+      if (b.speakerName && b.speakerName.trim()) {
+        lineas.push(`${b.speakerName}`);
+      }
       lineas.push(`[${tiempoInicio} - ${tiempoFin}]`);
       lineas.push(`${b.reviewedText}`);
       lineas.push('');
@@ -559,7 +563,11 @@ export class TranscriptionReviewerService {
 
       bloquesSrt.push(`${index + 1}`);
       bloquesSrt.push(`${startSrt} --> ${endSrt}`);
-      bloquesSrt.push(`<b>${b.speakerName}:</b> ${b.reviewedText}`);
+      if (b.speakerName && b.speakerName.trim()) {
+        bloquesSrt.push(`<b>${b.speakerName}:</b> ${b.reviewedText}`);
+      } else {
+        bloquesSrt.push(`${b.reviewedText}`);
+      }
       bloquesSrt.push('');
     });
 
@@ -712,7 +720,7 @@ export class TranscriptionReviewerService {
       lineas.push(`                         los sellos de tiempo y la asignación de personas hablantes.\n`);
     }
 
-    if (incCedula) {
+    if (incCedula && Object.keys(dossier.speakers).length > 0) {
       lineas.push(`--- ${seccionNum++}. CÉDULA DE PERSONAS HABLANTES IDENTIFICADAS ---`);
       lineas.push('| ID Técnico | Persona / Nombre Asignado | Rol Procesal | Intervenciones |');
       lineas.push('|:-----------|:--------------------------|:-------------|:---------------|');
@@ -741,7 +749,11 @@ export class TranscriptionReviewerService {
         const etiqueta = (mostrarRol && rol && !bloque.speakerName.toLowerCase().includes(rol.toLowerCase()))
           ? `${bloque.speakerName} (${rol})`
           : bloque.speakerName;
-        lineas.push(`[${idx + 1}] [${tiempoInicio} - ${tiempoFin}] ${etiqueta}:`);
+        if (etiqueta && etiqueta.trim()) {
+          lineas.push(`[${idx + 1}] [${tiempoInicio} - ${tiempoFin}] ${etiqueta}:`);
+        } else {
+          lineas.push(`[${idx + 1}] [${tiempoInicio} - ${tiempoFin}]:`);
+        }
         lineas.push(`    "${bloque.reviewedText}"\n`);
       });
     }
@@ -774,11 +786,16 @@ export class TranscriptionReviewerService {
     md.push(`- **Sugerencias Rechazadas (Conservadas Originales):** ${dossier.stats.rejectedCorrectionsCount}`);
     md.push(`- **Sugerencias Pendientes de Revisión:** ${dossier.stats.pendingSuggestionsCount}`);
 
-    md.push(`\n## 2. Registro de Hablantes y Diarización`);
-    md.push(`| ID Técnico Inmutable | Nombre Visible Asignado | Rol Procesal |`);
-    md.push(`| --- | --- | --- |`);
-    for (const h of Object.values(dossier.speakers)) {
-      md.push(`| \`${h.speakerId}\` | **${h.displayName}** | ${h.role || 'No especificado'} |`);
+    if (Object.keys(dossier.speakers).length > 0) {
+      md.push(`\n## 2. Registro de Hablantes y Diarización`);
+      md.push(`| ID Técnico Inmutable | Nombre Visible Asignado | Rol Procesal |`);
+      md.push(`| --- | --- | --- |`);
+      for (const h of Object.values(dossier.speakers)) {
+        md.push(`| \`${h.speakerId}\` | **${h.displayName}** | ${h.role || 'No especificado'} |`);
+      }
+    } else {
+      md.push(`\n## 2. Diarización de Hablantes`);
+      md.push(`*Diarización no aplicada en este expediente (transcripción continua).*`);
     }
 
     md.push(`\n## 3. Bitácora de Correcciones Detalladas`);
@@ -787,7 +804,8 @@ export class TranscriptionReviewerService {
     dossier.reviewedBlocks.forEach((b, idx) => {
       if (b.corrections.length > 0) {
         hayCorrecciones = true;
-        md.push(`\n### Bloque ${idx + 1} [${this.formatearSegundos(b.startTime)} - ${this.formatearSegundos(b.endTime)}] — ${b.speakerName}`);
+        const headerHablante = b.speakerName && b.speakerName.trim() ? ` — ${b.speakerName}` : '';
+        md.push(`\n### Bloque ${idx + 1} [${this.formatearSegundos(b.startTime)} - ${this.formatearSegundos(b.endTime)}]${headerHablante}`);
         md.push(`* **Texto Original Reconocido:** "${b.originalText}"`);
         md.push(`* **Texto Final Depurado:** "${b.reviewedText}"`);
         md.push(`\n| Original | Reemplazo | Confianza | Estado | Motivo de Regla |`);
