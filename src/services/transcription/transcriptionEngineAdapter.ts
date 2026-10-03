@@ -60,6 +60,10 @@ export class TranscriptionEngineAdapter implements ITranscriptionEngine {
             : 1.0,
           segundosProcesadosAudio: extra?.segundosProcesadosAudio,
           totalSegundosAudio: extra?.totalSegundosAudio,
+          accionActual: extra?.accionActual,
+          nombreEtapa: extra?.nombreEtapa,
+          evitarTruncamiento: opciones.evitarTruncamiento,
+          nombreArchivo: archivo.name,
         };
         opciones.onProgreso(telemetria);
       }

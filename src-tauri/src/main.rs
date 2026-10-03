@@ -1706,6 +1706,9 @@ async fn transcribir_audio_whisper(
                                 let tot_sec = v.get("total_sec").and_then(|x| x.as_f64());
                                 let msg = v.get("msg").and_then(|x| x.as_str()).unwrap_or("Decodificando audio con Whisper...").to_string();
 
+                                let action = v.get("action").and_then(|x| x.as_str());
+                                let substage = v.get("substage").and_then(|x| x.as_str());
+
                                 let _ = window_clone.emit("transcripcion-progreso", serde_json::json!({
                                     "porcentaje": pct,
                                     "mensaje": msg,
@@ -1715,6 +1718,8 @@ async fn transcribir_audio_whisper(
                                     "totalEtapas": total_etapas,
                                     "segundosProcesadosAudio": proc_sec,
                                     "totalSegundosAudio": tot_sec,
+                                    "accionActual": action,
+                                    "nombreEtapa": substage,
                                     "detalle": trimmed
                                 }));
                                 continue;
@@ -1723,6 +1728,8 @@ async fn transcribir_audio_whisper(
 
                         let mut pct = 45;
                         let mut etapa_num = 2;
+                        let mut nombre_etapa = "Decodificación Acústica Fonética";
+                        let mut accion_actual = format!("Decodificando señal acústica con Whisper ({})", modelo_clone);
                         let mut msg = if diarizar_activo {
                             format!("Etapa 2 de 4: Transcribiendo audio con Whisper ({})...", modelo_clone)
                         } else {
@@ -1732,6 +1739,7 @@ async fn transcribir_audio_whisper(
                         if trimmed.contains("ETAPA 1") || trimmed.contains("Cargando modelo") {
                             pct = 15;
                             etapa_num = 1;
+                            nombre_etapa = "Carga de Tensores y Preparación";
                             let disp = if trimmed.contains("GPU NVIDIA") {
                                 if let Some(start) = trimmed.find("GPU NVIDIA") {
                                     let sub = &trimmed[start..];
@@ -1743,18 +1751,25 @@ async fn transcribir_audio_whisper(
                             } else {
                                 "CPU".to_string()
                             };
+                            accion_actual = format!("Cargando pesos de {} en memoria ({}) y normalizando audio", modelo_clone, disp);
                             msg = format!("Etapa 1 de {}: Cargando modelo {} en {}...", total_etapas, modelo_clone, disp);
                         } else if trimmed.contains("ETAPA 2") || trimmed.contains("Transcribiendo") {
                             pct = if diarizar_activo { 45 } else { 55 };
                             etapa_num = 2;
+                            nombre_etapa = "Decodificación Acústica Fonética";
+                            accion_actual = "Extrayendo espectrogramas Mel e infiriendo fonemas continuos".to_string();
                             msg = format!("Etapa 2 de {}: Extrayendo espectrograma y decodificando audio con Whisper...", total_etapas);
                         } else if diarizar_activo && (trimmed.contains("ETAPA 3") || trimmed.contains("Diarizando") || trimmed.contains("Segmentos:")) {
                             pct = 75;
                             etapa_num = 3;
+                            nombre_etapa = "Diarización de Locutores";
+                            accion_actual = "Extrayendo perfiles de voz (x-vectors) y agrupando interlocutores".to_string();
                             msg = "Etapa 3 de 4: Diarizando voces y discriminando interlocutores...".to_string();
                         } else if trimmed.contains("ETAPA 4") || trimmed.contains("ETAPA 3/3") || trimmed.contains("Sincronizando") || trimmed.contains("Estructurando") {
                             pct = 92;
                             etapa_num = total_etapas;
+                            nombre_etapa = "Estructuración Pericial y Sellado";
+                            accion_actual = "Reconciliando marcas de tiempo, puliendo ortografía y generando actas".to_string();
                             msg = format!("Etapa {} de {}: Estructurando expediente y aplicando pulido ortográfico...", total_etapas, total_etapas);
                         }
 
@@ -1763,6 +1778,8 @@ async fn transcribir_audio_whisper(
                             "mensaje": msg,
                             "etapaActual": etapa_num,
                             "totalEtapas": total_etapas,
+                            "accionActual": accion_actual,
+                            "nombreEtapa": nombre_etapa,
                             "detalle": trimmed
                         }));
                     }

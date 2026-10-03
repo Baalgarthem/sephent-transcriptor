@@ -80,6 +80,14 @@ export class AudioTranscriptionEngine {
             : new AntiTruncationService();
           const validacion = antiTrunc.validarCobertura(resultado.durationSeconds, finalSegments);
           if (validacion.tieneTruncamiento && validacion.segundosFaltantes > 5.0) {
+            if (onProgreso) {
+              onProgreso(95, '🛡️ Blindaje anti-truncamiento activo: rescatando fragmentos de audio de la cola...', {
+                etapaActual: diarizar ? 4 : 3,
+                totalEtapas: diarizar ? 4 : 3,
+                accionActual: `Rescatando ${validacion.segundosFaltantes.toFixed(1)}s de audio final para garantizar cobertura íntegra sin cortes.`,
+                nombreEtapa: 'Blindaje Anti-Truncamiento y Rescate',
+              });
+            }
             const rescate = antiTrunc.generarSegmentosRescate(
               resultado.durationSeconds,
               validacion.tiempoTranscritoSegundos,

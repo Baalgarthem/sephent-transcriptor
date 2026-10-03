@@ -103,9 +103,13 @@ export class WhisperBridgeService {
               segundosProcesadosAudio: typeof payload.segundosProcesadosAudio === 'number'
                 ? payload.segundosProcesadosAudio
                 : undefined,
-              totalSegundosAudio: typeof payload.totalSegundosAudio === 'number'
-                ? payload.totalSegundosAudio
-                : undefined,
+              accionActual: typeof payload.accionActual === 'string'
+                ? payload.accionActual
+                : (typeof payload.action === 'string' ? payload.action : undefined),
+              nombreEtapa: typeof payload.nombreEtapa === 'string'
+                ? payload.nombreEtapa
+                : (typeof payload.substage === 'string' ? payload.substage : undefined),
+              detalle: typeof payload.detalle === 'string' ? payload.detalle : undefined,
             };
 
             onProgreso(pct, msg, extra);

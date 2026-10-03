@@ -71,6 +71,9 @@ export default function ClassicTranscriptionView(): React.ReactElement {
     segundosProcesadosAudio?: number;
     totalSegundosAudio?: number;
     nombreArchivo?: string;
+    accionActual?: string;
+    nombreEtapa?: string;
+    evitarTruncamiento?: boolean;
   }>({
     porcentaje: 0,
     etapaActual: 1,
@@ -78,6 +81,7 @@ export default function ClassicTranscriptionView(): React.ReactElement {
     mensaje: '',
     tiempoEstimadoSegundos: 0,
     velocidadFactor: 1.0,
+    evitarTruncamiento: configInicial.evitarTruncamiento ?? true,
   });
 
   const [isDragOver, setIsDragOver] = useState(false);
@@ -572,6 +576,9 @@ export default function ClassicTranscriptionView(): React.ReactElement {
                 segundosProcesadosAudio: telemetria.segundosProcesadosAudio,
                 totalSegundosAudio: telemetria.totalSegundosAudio,
                 nombreArchivo: file.name,
+                accionActual: telemetria.accionActual,
+                nombreEtapa: telemetria.nombreEtapa,
+                evitarTruncamiento: telemetria.evitarTruncamiento ?? evitarTruncamiento,
               });
             }
           },
@@ -1407,6 +1414,9 @@ export default function ClassicTranscriptionView(): React.ReactElement {
               segundosProcesadosAudio={telemetriaActual.segundosProcesadosAudio}
               totalSegundosAudio={telemetriaActual.totalSegundosAudio}
               nombreArchivo={telemetriaActual.nombreArchivo}
+              accionActual={telemetriaActual.accionActual}
+              nombreEtapa={telemetriaActual.nombreEtapa}
+              evitarTruncamiento={telemetriaActual.evitarTruncamiento ?? evitarTruncamiento}
               enCancelar={handleCancelarTranscripcion}
               cancelando={isCanceling}
             />

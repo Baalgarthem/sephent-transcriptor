@@ -67,6 +67,9 @@ export default function StreamlinedTranscriptionView(): React.ReactElement {
     segundosProcesadosAudio?: number;
     totalSegundosAudio?: number;
     nombreArchivo?: string;
+    accionActual?: string;
+    nombreEtapa?: string;
+    evitarTruncamiento?: boolean;
   }>({
     porcentaje: 0,
     etapaActual: 1,
@@ -74,6 +77,7 @@ export default function StreamlinedTranscriptionView(): React.ReactElement {
     mensaje: '',
     tiempoEstimadoSegundos: 0,
     velocidadFactor: 1.0,
+    evitarTruncamiento: configInicial.evitarTruncamiento ?? true,
   });
 
   const [ultimasTranscripciones, setUltimasTranscripciones] = useState<StoredTranscription[]>([]);
@@ -256,6 +260,9 @@ export default function StreamlinedTranscriptionView(): React.ReactElement {
                 segundosProcesadosAudio: t.segundosProcesadosAudio,
                 totalSegundosAudio: t.totalSegundosAudio,
                 nombreArchivo: file.name,
+                accionActual: t.accionActual,
+                nombreEtapa: t.nombreEtapa,
+                evitarTruncamiento: t.evitarTruncamiento ?? evitarTruncamiento,
               });
             }
           },
@@ -826,6 +833,9 @@ export default function StreamlinedTranscriptionView(): React.ReactElement {
             segundosProcesadosAudio={telemetria.segundosProcesadosAudio}
             totalSegundosAudio={telemetria.totalSegundosAudio}
             nombreArchivo={telemetria.nombreArchivo}
+            accionActual={telemetria.accionActual}
+            nombreEtapa={telemetria.nombreEtapa}
+            evitarTruncamiento={telemetria.evitarTruncamiento ?? evitarTruncamiento}
             enCancelar={enEjecucion ? handleCancelar : undefined}
             cancelando={cancelando}
           />

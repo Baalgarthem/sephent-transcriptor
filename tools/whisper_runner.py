@@ -1343,6 +1343,8 @@ def transcribir(file_path: str, model_name: str, language: str,
                         "stage": 2,
                         "processed_sec": round(processed_sec, 1),
                         "total_sec": round(audio_duration, 1),
+                        "substage": "Decodificación Acústica Fonética",
+                        "action": f"Inferencia fonética acústica ({processed_sec:.1f}s / {audio_duration:.1f}s) • Whisper {resolved_model} activo",
                         "msg": f"Decodificando audio con Whisper ({pct_global:.1f}%)..."
                     }
                     print(f"[whisper_progress] {json.dumps(prog_data)}", file=sys.stderr, flush=True)
@@ -1386,6 +1388,8 @@ def transcribir(file_path: str, model_name: str, language: str,
                         "stage": 2,
                         "processed_sec": round(processed_sec, 1),
                         "total_sec": round(audio_duration, 1),
+                        "substage": "Decodificación Acústica Fonética",
+                        "action": f"Decodificando inferencia fonética ({processed_sec:.1f}s / {audio_duration:.1f}s) • Whisper {resolved_model} activo",
                         "msg": f"Decodificando audio con Whisper ({pct_global:.1f}%)..."
                     }
                     print(f"[whisper_progress] {json.dumps(prog_data)}", file=sys.stderr, flush=True)
@@ -1516,6 +1520,18 @@ def transcribir(file_path: str, model_name: str, language: str,
     # ── RUTA RÁPIDA: Diarización Desactivada por el Usuario ─────────────────────
     if not diarize:
         print(f"[whisper_runner] ETAPA 3/3: Estructurando expediente y aplicando pulido ortográfico pericial...", file=sys.stderr, flush=True)
+        prog_data = {
+            "pct": 92.0,
+            "eta_sec": 2,
+            "speed": 3.5,
+            "stage": 3,
+            "substage": "Estructuración Pericial",
+            "action": "Estructurando expediente, alineando marcas de tiempo y aplicando pulido ortográfico",
+            "processed_sec": round(duration, 1),
+            "total_sec": round(audio_duration, 1),
+            "msg": "Estructurando expediente y aplicando pulido ortográfico pericial..."
+        }
+        print(f"[whisper_progress] {json.dumps(prog_data)}", file=sys.stderr, flush=True)
         output_segments = []
         for i, seg in enumerate(segments_raw):
             start_t = round(float(seg.get("start", 0.0)), 3)
@@ -1542,6 +1558,19 @@ def transcribir(file_path: str, model_name: str, language: str,
         }
 
     # ── ETAPA 3/4: Diarización de interlocutores ──────────────────────────────
+    prog_data = {
+        "pct": 74.0,
+        "eta_sec": max(3, round(audio_duration * 0.05)),
+        "speed": 2.5,
+        "stage": 3,
+        "substage": "Diarización de Voces",
+        "action": "Extrayendo perfiles de voz y clustering para discriminar interlocutores",
+        "processed_sec": round(duration, 1),
+        "total_sec": round(audio_duration, 1),
+        "msg": "Diarizando voces y discriminando interlocutores periciales..."
+    }
+    print(f"[whisper_progress] {json.dumps(prog_data)}", file=sys.stderr, flush=True)
+
     usar_pyannote = False
     diar_result_pyannote = None
 
@@ -1564,6 +1593,18 @@ def transcribir(file_path: str, model_name: str, language: str,
     if usar_pyannote and diar_result_pyannote is not None:
         # Reconciliación desacoplada Whisper (texto) + pyannote (hablantes y tiempos)
         print(f"[whisper_runner] ETAPA 4/4: Reconciliando transcripción con diarización exclusiva y estructurando expediente...", file=sys.stderr, flush=True)
+        prog_data = {
+            "pct": 94.0,
+            "eta_sec": 2,
+            "speed": 4.0,
+            "stage": 4,
+            "substage": "Estructuración y Sellado",
+            "action": "Reconciliando intervenciones con hablantes y generando actas forenses",
+            "processed_sec": round(duration, 1),
+            "total_sec": round(audio_duration, 1),
+            "msg": "Reconciliando transcripción con diarización y generando actas..."
+        }
+        print(f"[whisper_progress] {json.dumps(prog_data)}", file=sys.stderr, flush=True)
         mock_whisper_res = {
             "segments": segments_raw,
             "language": detected_language,

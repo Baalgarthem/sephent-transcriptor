@@ -17,6 +17,10 @@ export interface TelemetriaTranscripcion {
   velocidadFactor?: number;
   segundosProcesadosAudio?: number;
   totalSegundosAudio?: number;
+  accionActual?: string;
+  nombreEtapa?: string;
+  evitarTruncamiento?: boolean;
+  nombreArchivo?: string;
 }
 
 export interface OpcionesTranscripcionContrato {
