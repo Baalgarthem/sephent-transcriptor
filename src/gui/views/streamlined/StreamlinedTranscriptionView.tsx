@@ -342,6 +342,33 @@ export default function StreamlinedTranscriptionView(): React.ReactElement {
           }
         }
 
+        if (!resultadoAudio.logPath && typeof window !== 'undefined' && (window as any).__TAURI__?.invoke) {
+          try {
+            const tauri = (window as any).__TAURI__;
+            const rutaAudioLog = rutaOrigenArchivo || file.name;
+            const modeloLog = WHISPER_MODELS[modelo]?.nombreVisible || modelo;
+            const logPathRes = await tauri.invoke('registrar_transcripcion_log', {
+              archivo: rutaAudioLog,
+              modelo: modeloLog,
+              horaInicio: resultadoAudio.horaInicio || 'N/A',
+              horaFin: resultadoAudio.horaFin || 'N/A',
+              duracionSegundos: resultadoAudio.duracionSegundos || 0,
+              fragmentos: resultadoAudio.rawSegments?.length || 0,
+              estado: statusFinal === 'completado' ? 'COMPLETADO' : 'PARCIAL',
+              rutaDestino: carpetaDestino || null,
+            });
+            if (logPathRes && typeof logPathRes === 'string') {
+              resultadoAudio.logPath = logPathRes;
+            }
+          } catch (logErr) {
+            console.warn('Aviso al registrar log de transcripción:', logErr);
+          }
+        }
+
+        console.log(
+          `[LOG TRANSCRIPCIÓN] Archivo: ${file.name} | Modelo: ${WHISPER_MODELS[modelo]?.nombreVisible || modelo} | Inicio: ${resultadoAudio.horaInicio || 'N/A'} | Fin: ${resultadoAudio.horaFin || 'N/A'} | Tardó: ${resultadoAudio.duracionFormateada || '0s'} (${resultadoAudio.duracionSegundos || 0}s) | Fragmentos: ${resultadoAudio.rawSegments?.length || 0} | Estado: ${statusFinal}`
+        );
+
         TranscriptionDatabase.guardar({
           fileName: file.name,
           fileType: 'audio',
@@ -360,6 +387,10 @@ export default function StreamlinedTranscriptionView(): React.ReactElement {
           textContent: resultadoAudio.txtContent,
           srtContent: resultadoAudio.srtContent,
           speakerNames: resultadoAudio.speakerNames,
+          horaInicio: resultadoAudio.horaInicio,
+          horaFin: resultadoAudio.horaFin,
+          duracionSegundos: resultadoAudio.duracionSegundos,
+          duracionFormateada: resultadoAudio.duracionFormateada,
         });
 
         if (cancelacionSolicitada.current) {
@@ -1020,7 +1051,17 @@ export default function StreamlinedTranscriptionView(): React.ReactElement {
                     {t.fileName}
                   </strong>
                   <span style={{ fontSize: '0.75rem', color: THEME_TOKENS.colors.textMuted, marginLeft: '0.65rem' }}>
-                    {t.date} · Modelo: {t.modelUsed} · {t.rawSegments?.length || 0} fragmentos
+                    {t.horaInicio && t.horaFin ? (
+                      <>
+                        {t.date ? `${t.date.split(',')[0]} · ` : ''}
+                        Inicio: {t.horaInicio} · Fin: {t.horaFin} · Tardó: {t.duracionFormateada || '0s'} · Modelo: {t.modelUsed} · {t.rawSegments?.length || 0} fragmentos
+                      </>
+                    ) : (
+                      <>
+                        {t.date}
+                        {t.duracionFormateada ? ` · Tardó: ${t.duracionFormateada}` : ''} · Modelo: {t.modelUsed} · {t.rawSegments?.length || 0} fragmentos
+                      </>
+                    )}
                   </span>
                 </div>
                 <div style={{ display: 'flex', gap: '0.45rem' }}>

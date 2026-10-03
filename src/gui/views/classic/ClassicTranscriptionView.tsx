@@ -681,6 +681,33 @@ export default function ClassicTranscriptionView(): React.ReactElement {
         const esParcial = !!resultadoAudio.isPartial;
         const statusFinal: 'completado' | 'parcial' | 'error' = esParcial ? 'parcial' : 'completado';
 
+        if (!resultadoAudio.logPath && typeof window !== 'undefined' && (window as any).__TAURI__?.invoke) {
+          try {
+            const tauri = (window as any).__TAURI__;
+            const rutaAudioLog = rutaOrigenArchivo || file.name;
+            const modeloLog = WHISPER_MODELS[model]?.nombreVisible || model;
+            const logPathRes = await tauri.invoke('registrar_transcripcion_log', {
+              archivo: rutaAudioLog,
+              modelo: modeloLog,
+              horaInicio: resultadoAudio.horaInicio || 'N/A',
+              horaFin: resultadoAudio.horaFin || 'N/A',
+              duracionSegundos: resultadoAudio.duracionSegundos || 0,
+              fragmentos: resultadoAudio.rawSegments?.length || 0,
+              estado: statusFinal === 'completado' ? 'COMPLETADO' : 'PARCIAL',
+              rutaDestino: carpetaDestino || null,
+            });
+            if (logPathRes && typeof logPathRes === 'string') {
+              resultadoAudio.logPath = logPathRes;
+            }
+          } catch (logErr) {
+            console.warn('Aviso al registrar log de transcripción en vista clásica:', logErr);
+          }
+        }
+
+        console.log(
+          `[LOG TRANSCRIPCIÓN] Archivo: ${file.name} | Modelo: ${WHISPER_MODELS[model]?.nombreVisible || model} | Inicio: ${resultadoAudio.horaInicio || 'N/A'} | Fin: ${resultadoAudio.horaFin || 'N/A'} | Tardó: ${resultadoAudio.duracionFormateada || '0s'} (${resultadoAudio.duracionSegundos || 0}s) | Fragmentos: ${resultadoAudio.rawSegments?.length || 0} | Estado: ${statusFinal}`
+        );
+
         const registroBD = TranscriptionDatabase.guardar({
           fileName: file.name,
           fileType: esArchivoVideo(file) ? 'video' : 'audio',
@@ -700,6 +727,10 @@ export default function ClassicTranscriptionView(): React.ReactElement {
           srtContent: resultadoAudio.srtContent,
           audioBlobUrl: audioBlobUrl,
           speakerNames: resultadoAudio.speakerNames,
+          horaInicio: resultadoAudio.horaInicio,
+          horaFin: resultadoAudio.horaFin,
+          duracionSegundos: resultadoAudio.duracionSegundos,
+          duracionFormateada: resultadoAudio.duracionFormateada,
         });
 
         records.push({
@@ -714,6 +745,10 @@ export default function ClassicTranscriptionView(): React.ReactElement {
           status: statusFinal,
           errorMotivo: resultadoAudio.errorMotivo,
           logPath: resultadoAudio.logPath,
+          horaInicio: resultadoAudio.horaInicio,
+          horaFin: resultadoAudio.horaFin,
+          duracionSegundos: resultadoAudio.duracionSegundos,
+          duracionFormateada: resultadoAudio.duracionFormateada,
         });
       }
 

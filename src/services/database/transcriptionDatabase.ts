@@ -12,6 +12,20 @@ export interface SalidaGeneradaInfo {
   fullPath: string;
 }
 
+export function formatearDuracion(segundos: number): string {
+  if (!segundos || segundos <= 0) return '0s';
+  const h = Math.floor(segundos / 3600);
+  const m = Math.floor((segundos % 3600) / 60);
+  const s = Math.round(segundos % 60);
+  if (h > 0) {
+    return `${h}h ${m}m ${s}s`;
+  }
+  if (m > 0) {
+    return `${m}m ${s}s`;
+  }
+  return `${s}s`;
+}
+
 export interface StoredTranscription {
   id: string;
   fileName: string;
@@ -29,6 +43,10 @@ export interface StoredTranscription {
   wasCancelled?: boolean;
   errorMotivo?: string;
   logPath?: string;
+  horaInicio?: string;
+  horaFin?: string;
+  duracionSegundos?: number;
+  duracionFormateada?: string;
   speakerNames?: Record<string, string>;
   speakerRoles?: Record<string, string>;
   speakers?: Record<string, any>;
@@ -164,11 +182,27 @@ export class TranscriptionDatabase {
       second: '2-digit',
     });
 
+    const horaActual = ahora.toLocaleTimeString('es-ES', {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    });
+    const horaFinCalculada = datos.horaFin || horaActual;
+    const horaInicioCalculada = datos.horaInicio || horaFinCalculada;
+    const duracionSegundosCalculada = typeof datos.duracionSegundos === 'number'
+      ? datos.duracionSegundos
+      : 0;
+    const duracionFormateadaCalculada = datos.duracionFormateada || formatearDuracion(duracionSegundosCalculada);
+
     const nuevoRegistro: StoredTranscription = {
       ...datos,
       id,
       date,
       timestamp: ahora.getTime(),
+      horaInicio: horaInicioCalculada,
+      horaFin: horaFinCalculada,
+      duracionSegundos: duracionSegundosCalculada,
+      duracionFormateada: duracionFormateadaCalculada,
     };
 
     const listaActual = this.obtenerTodas();
@@ -538,6 +572,8 @@ export class TranscriptionDatabase {
     const txtCombinado = `${t1.textContent || ''}\n\n================================================================================\n                   CONTINUACIÓN DE LA TRANSCRIPCIÓN (${t2.fileName})\n================================================================================\n\n${t2.textContent || ''}`.trim();
     const srtCombinado = `${t1.srtContent || ''}\n\n${t2.srtContent || ''}`.trim();
 
+    const durSegundosCombinada = (t1.duracionSegundos || 0) + (t2.duracionSegundos || 0);
+
     const nueva = this.guardar({
       fileName: nombreCombinado,
       fileType: t1.fileType === 'video' || t2.fileType === 'video' ? 'video' : 'audio',
@@ -546,6 +582,10 @@ export class TranscriptionDatabase {
       language: t1.language || t2.language,
       destinationType: t1.destinationType,
       destinationFolder: t1.destinationFolder,
+      horaInicio: t1.horaInicio || t2.horaInicio,
+      horaFin: t2.horaFin || t1.horaFin,
+      duracionSegundos: durSegundosCombinada,
+      duracionFormateada: formatearDuracion(durSegundosCombinada),
       outputs: (t1.outputs || []).map(o => ({
         ...o,
         fileName: `${baseT1}_Y_${baseT2}.${o.format}`,

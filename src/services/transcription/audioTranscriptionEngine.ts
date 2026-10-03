@@ -32,6 +32,8 @@ export interface OpcionesProcesamiento {
   onProgreso?: (porcentaje: number, mensaje: string, extra?: any) => void;
 }
 
+import { formatearDuracion } from '../database/transcriptionDatabase';
+
 export interface ResultadoProcesamientoAudio {
   segments: RawTranscriptSegment[];
   txtContent: string;
@@ -43,6 +45,10 @@ export interface ResultadoProcesamientoAudio {
   status?: 'completado' | 'parcial' | 'error';
   errorMotivo?: string;
   logPath?: string;
+  horaInicio?: string;
+  horaFin?: string;
+  duracionSegundos?: number;
+  duracionFormateada?: string;
 }
 
 export class AudioTranscriptionEngine {
@@ -57,6 +63,12 @@ export class AudioTranscriptionEngine {
     opciones: OpcionesProcesamiento
   ): Promise<ResultadoProcesamientoAudio> {
     const { onProgreso, diarizar = true, evitarTruncamiento = true } = opciones;
+    const instanteInicio = new Date();
+    const horaInicioCalculada = instanteInicio.toLocaleTimeString('es-ES', {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    });
 
     // --- Ruta 1: Transcripcion real con Whisper (entorno Tauri desktop) ---
     if (WhisperBridgeService.esModoDesktop()) {
@@ -118,6 +130,16 @@ export class AudioTranscriptionEngine {
           }
         }
 
+        const instanteFin1 = new Date();
+        const duracionMs1 = Math.max(0, instanteFin1.getTime() - instanteInicio.getTime());
+        const durSeg1 = Math.max(1, Math.round(duracionMs1 / 1000));
+        const horaFinCalc1 = instanteFin1.toLocaleTimeString('es-ES', {
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+        });
+        const durFmt1 = formatearDuracion(durSeg1);
+
         return {
           segments: finalSegments,
           txtContent,
@@ -129,6 +151,10 @@ export class AudioTranscriptionEngine {
           status: (resultado.status as any) || (resultado.isPartial ? 'parcial' : 'completado'),
           errorMotivo: resultado.errorMotivo,
           logPath: resultado.logPath,
+          horaInicio: (resultado as any).horaInicio || horaInicioCalculada,
+          horaFin: (resultado as any).horaFin || horaFinCalc1,
+          duracionSegundos: (resultado as any).duracionSegundos ?? durSeg1,
+          duracionFormateada: (resultado as any).duracionFormateada || durFmt1,
         };
       } catch (err: any) {
         // En entorno de escritorio, no ocultar errores reales con simulaciones
@@ -175,7 +201,27 @@ export class AudioTranscriptionEngine {
 
     if (onProgreso) onProgreso(95, `Etapa ${totalEtapas} de ${totalEtapas}: Generando formatos documentales (.txt, .srt)...`);
 
-    return { segments: segmentos, txtContent, srtContent, speakerNames, durationSeconds: duracion };
+    const instanteFin2 = new Date();
+    const duracionMs2 = Math.max(0, instanteFin2.getTime() - instanteInicio.getTime());
+    const durSeg2 = Math.max(1, Math.round(duracionMs2 / 1000));
+    const horaFinCalc2 = instanteFin2.toLocaleTimeString('es-ES', {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    });
+    const durFmt2 = formatearDuracion(durSeg2);
+
+    return {
+      segments: segmentos,
+      txtContent,
+      srtContent,
+      speakerNames,
+      durationSeconds: duracion,
+      horaInicio: horaInicioCalculada,
+      horaFin: horaFinCalc2,
+      duracionSegundos: durSeg2,
+      duracionFormateada: durFmt2,
+    };
   }
 
   // ---------------------------------------------------------------------------

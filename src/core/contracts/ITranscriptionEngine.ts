@@ -49,6 +49,10 @@ export interface ResultadoTranscripcionContrato {
   status?: 'completado' | 'parcial' | 'error';
   errorMotivo?: string;
   logPath?: string;
+  horaInicio?: string;
+  horaFin?: string;
+  duracionSegundos?: number;
+  duracionFormateada?: string;
 }
 
 export interface ITranscriptionEngine {

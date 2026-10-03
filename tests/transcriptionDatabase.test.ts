@@ -3,7 +3,7 @@
  * Validación de persistencia, CRUD, resolución de rutas y prevención de colisiones.
  */
 
-import { TranscriptionDatabase } from '../src/services/database/transcriptionDatabase';
+import { TranscriptionDatabase, formatearDuracion } from '../src/services/database/transcriptionDatabase';
 import { OutputPathService } from '../src/services/transcription/outputPathService';
 
 async function ejecutarPruebasDatabase() {
@@ -210,6 +210,33 @@ async function ejecutarPruebasDatabase() {
   // El segundo segmento debe tener offset de 5 segundos
   const segundoSeg = trxCombinada?.rawSegments?.[1];
   afirmar(segundoSeg?.startTime === 5 && segundoSeg?.endTime === 11, `El segundo segmento tiene offset temporal acumulado: [${segundoSeg?.startTime} - ${segundoSeg?.endTime}]`);
+
+  // 5. Validando formatearDuracion y telemetría de tiempos
+  console.log('\n⏱️ 5. Validando formatearDuracion y Telemetría Temporal...');
+  afirmar(formatearDuracion(0) === '0s', 'formatearDuracion(0) retorna "0s"');
+  afirmar(formatearDuracion(45) === '45s', 'formatearDuracion(45) retorna "45s"');
+  afirmar(formatearDuracion(155) === '2m 35s', 'formatearDuracion(155) retorna "2m 35s"');
+  afirmar(formatearDuracion(3665) === '1h 1m 5s', 'formatearDuracion(3665) retorna "1h 1m 5s"');
+
+  const trxConTiempos = TranscriptionDatabase.guardar({
+    fileName: 'juicio_oral_tiempo.wav',
+    fileType: 'audio',
+    fileSizeFormatted: '12.0 MB',
+    modelUsed: 'Whisper Small',
+    language: 'ES',
+    destinationType: 'original',
+    destinationFolder: 'C:\\Audios',
+    outputs: [],
+    status: 'completado',
+    horaInicio: '10:15:30',
+    horaFin: '10:18:05',
+    duracionSegundos: 155,
+  });
+
+  afirmar(trxConTiempos.horaInicio === '10:15:30', 'Almacena horaInicio de forma persistente');
+  afirmar(trxConTiempos.horaFin === '10:18:05', 'Almacena horaFin de forma persistente');
+  afirmar(trxConTiempos.duracionSegundos === 155, 'Almacena duracionSegundos de forma persistente');
+  afirmar(trxConTiempos.duracionFormateada === '2m 35s', 'Calcula automáticamente duracionFormateada si no se proporciona');
 
   console.log('\n========================================================');
   console.log(`🎉 Resultados: ${superadas} de ${totales} pruebas PASARON exitosamente.`);

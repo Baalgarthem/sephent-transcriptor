@@ -26,6 +26,10 @@ export interface ResultadoWhisper {
   error?: string;
   errorMotivo?: string;
   logPath?: string;
+  horaInicio?: string;
+  horaFin?: string;
+  duracionSegundos?: number;
+  duracionFormateada?: string;
 }
 
 import { WhisperPathService } from '../whisperPathService';

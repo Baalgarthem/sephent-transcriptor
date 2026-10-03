@@ -1496,6 +1496,126 @@ async fn registrar_error_log(
     .map_err(|e| format!("Error al registrar log: {}", e))?
 }
 
+#[cfg(target_os = "windows")]
+fn obtener_hora_local_hhmmss(_st: &std::time::SystemTime) -> String {
+    #[repr(C)]
+    struct SYSTEMTIME {
+        w_year: u16,
+        w_month: u16,
+        w_day_of_week: u16,
+        w_day: u16,
+        w_hour: u16,
+        w_minute: u16,
+        w_second: u16,
+        w_milliseconds: u16,
+    }
+    extern "system" {
+        fn GetLocalTime(lpSystemTime: *mut SYSTEMTIME);
+    }
+    unsafe {
+        let mut sys_time: SYSTEMTIME = std::mem::zeroed();
+        GetLocalTime(&mut sys_time);
+        format!("{:02}:{:02}:{:02}", sys_time.w_hour, sys_time.w_minute, sys_time.w_second)
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn obtener_hora_local_hhmmss(st: &std::time::SystemTime) -> String {
+    let now = st.duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
+    let total_secs = now.as_secs();
+    let secs_day = total_secs % 86400;
+    let hours = secs_day / 3600;
+    let minutes = (secs_day % 3600) / 60;
+    let seconds = secs_day % 60;
+    format!("{:02}:{:02}:{:02}", hours, minutes, seconds)
+}
+
+fn formatear_duracion_rust(segundos: f64) -> String {
+    let seg_u = segundos.max(0.0) as u64;
+    let h = seg_u / 3600;
+    let m = (seg_u % 3600) / 60;
+    let s = seg_u % 60;
+    if h > 0 {
+        format!("{}h {}m {}s", h, m, s)
+    } else if m > 0 {
+        format!("{}m {}s", m, s)
+    } else {
+        format!("{}s", s)
+    }
+}
+
+fn registrar_log_transcripcion(
+    archivo: &str,
+    modelo: &str,
+    hora_inicio: &str,
+    hora_fin: &str,
+    duracion_segundos: f64,
+    fragmentos: usize,
+    estado: &str,
+    ruta_destino: Option<&str>,
+) -> PathBuf {
+    let logs_dir = resolver_carpeta_logs();
+    let log_file = logs_dir.join("sephent_transcripciones.log");
+    let ts = obtener_timestamp_iso();
+    let dur_fmt = formatear_duracion_rust(duracion_segundos);
+    let dest_info = ruta_destino.unwrap_or("Carpeta de origen del archivo (Predeterminada)");
+
+    let entrada = format!(
+        "\n================================================================================\n\
+        FECHA/HORA: {}\n\
+        REGISTRO: TRANSCRIPCIÓN DE AUDIO/VIDEO\n\
+        ESTADO: {}\n\
+        ARCHIVO PROCESADO: {}\n\
+        MODELO WHISPER: {}\n\
+        HORA DE INICIO: {}\n\
+        HORA DE FIN: {}\n\
+        TIEMPO TOTAL QUE TARDÓ (DURACIÓN): {} ({:.2} segundos)\n\
+        TOTAL DE FRAGMENTOS GENERADOS: {}\n\
+        CARPETA DESTINO: {}\n\
+        ================================================================================\n",
+        ts, estado, archivo, modelo, hora_inicio, hora_fin, dur_fmt, duracion_segundos, fragmentos, dest_info
+    );
+
+    println!(
+        "[LOG TRANSCRIPCIÓN] Archivo: {} | Modelo: {} | Inicio: {} | Fin: {} | Tardó: {} ({:.2}s) | Fragmentos: {} | Estado: {}",
+        archivo, modelo, hora_inicio, hora_fin, dur_fmt, duracion_segundos, fragmentos, estado
+    );
+
+    if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(&log_file) {
+        let _ = file.write_all(entrada.as_bytes());
+    }
+
+    log_file
+}
+
+#[tauri::command]
+async fn registrar_transcripcion_log(
+    archivo: String,
+    modelo: String,
+    hora_inicio: String,
+    hora_fin: String,
+    duracion_segundos: f64,
+    fragmentos: usize,
+    estado: String,
+    ruta_destino: Option<String>,
+) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let path = registrar_log_transcripcion(
+            &archivo,
+            &modelo,
+            &hora_inicio,
+            &hora_fin,
+            duracion_segundos,
+            fragmentos,
+            &estado,
+            ruta_destino.as_deref(),
+        );
+        Ok(path.to_string_lossy().to_string())
+    })
+    .await
+    .map_err(|e| format!("Error al registrar log de transcripción: {}", e))?
+}
+
 #[tauri::command]
 async fn abrir_carpeta_logs() -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(|| {
@@ -1664,6 +1784,10 @@ async fn transcribir_audio_whisper(
             "porcentaje": 15,
             "mensaje": format!("Etapa 1 de {}: Cargando modelo {} en memoria...", total_etapas, modelo_norm)
         }));
+
+        let tiempo_inicio_st = std::time::SystemTime::now();
+        let instante_inicio = std::time::Instant::now();
+        let hora_inicio_str = obtener_hora_local_hhmmss(&tiempo_inicio_st);
 
         let mut child = cmd.spawn().map_err(|e| format!("Error al lanzar Python ({}) para transcripción: {}", info.python_ruta, e))?;
         
@@ -1885,10 +2009,39 @@ async fn transcribir_audio_whisper(
             .and_then(|s| s.as_array())
             .is_some_and(|arr| !arr.is_empty());
 
+        let tiempo_fin_st = std::time::SystemTime::now();
+        let duracion_secs = instante_inicio.elapsed().as_secs_f64();
+        let hora_fin_str = obtener_hora_local_hhmmss(&tiempo_fin_st);
+        let duracion_formateada = formatear_duracion_rust(duracion_secs);
+
         // 1. Caso resiliente: Hay segmentos recuperados (completos o parciales por cancelación o interrupción técnica)
         if tiene_segmentos {
             let mut val = val_parsed_opt.unwrap();
             let es_parcial_efectivo = es_parcial || fue_cancelado || !status.success() || val.get("isPartial").and_then(|p| p.as_bool()).unwrap_or(false);
+
+            let total_fragmentos = val.get("segments").and_then(|s| s.as_array()).map(|arr| arr.len()).unwrap_or(0);
+            val["horaInicio"] = serde_json::json!(hora_inicio_str);
+            val["horaFin"] = serde_json::json!(hora_fin_str);
+            val["duracionSegundos"] = serde_json::json!(duracion_secs);
+            val["duracionFormateada"] = serde_json::json!(duracion_formateada);
+
+            let estado_log = if es_parcial_efectivo {
+                if fue_cancelado { "CANCELADO (PARCIAL)" } else { "INTERRUMPIDO (PARCIAL)" }
+            } else {
+                "COMPLETADO"
+            };
+
+            let log_file = registrar_log_transcripcion(
+                &ruta_audio,
+                &modelo_norm,
+                &hora_inicio_str,
+                &hora_fin_str,
+                duracion_secs,
+                total_fragmentos,
+                estado_log,
+                None,
+            );
+            val["logPath"] = serde_json::json!(log_file.to_string_lossy().to_string());
 
             if es_parcial_efectivo {
                 val["isPartial"] = serde_json::json!(true);
@@ -1906,17 +2059,17 @@ async fn transcribir_audio_whisper(
                     let err_detalle = val.get("error")
                         .and_then(|e| e.as_str())
                         .unwrap_or("Fallo prematuro durante el procesamiento acústico.");
-                    let log_file = registrar_log_error(
+                    let err_log_file = registrar_log_error(
                         "MotorTranscripcion",
                         &format!("Interrupción técnica (código {:?}): {}", status.code(), err_detalle),
                         Some(&stderr_str),
                         Some(&ruta_audio)
                     );
                     val["errorMotivo"] = serde_json::json!(err_detalle);
-                    val["logPath"] = serde_json::json!(log_file.to_string_lossy().to_string());
+                    val["logPath"] = serde_json::json!(err_log_file.to_string_lossy().to_string());
                     let _ = window.emit("transcripcion-progreso", serde_json::json!({
                         "porcentaje": 100,
-                        "mensaje": format!("Interrupción técnica en Whisper. Se rescató la transcripción parcial y se registró log en {}", log_file.display())
+                        "mensaje": format!("Interrupción técnica en Whisper. Se rescató la transcripción parcial y se registró log en {}", err_log_file.display())
                     }));
                 } else {
                     let _ = window.emit("transcripcion-progreso", serde_json::json!({
@@ -1936,6 +2089,16 @@ async fn transcribir_audio_whisper(
 
         // 2. Caso sin segmentos recuperados (error inicial o cancelación previa a decodificación)
         if fue_cancelado {
+            let _ = registrar_log_transcripcion(
+                &ruta_audio,
+                &modelo_norm,
+                &hora_inicio_str,
+                &hora_fin_str,
+                duracion_secs,
+                0,
+                "CANCELADO",
+                None,
+            );
             return Err("Transcripción cancelada por el usuario antes de procesar segmentos.".to_string());
         }
 
@@ -1945,6 +2108,17 @@ async fn transcribir_audio_whisper(
         } else {
             "El proceso de Whisper finalizó sin generar datos."
         };
+
+        let _ = registrar_log_transcripcion(
+            &ruta_audio,
+            &modelo_norm,
+            &hora_inicio_str,
+            &hora_fin_str,
+            duracion_secs,
+            0,
+            "ERROR",
+            None,
+        );
 
         let log_file = registrar_log_error(
             "MotorTranscripcion",
@@ -1979,6 +2153,7 @@ fn main() {
             seleccionar_carpeta_dialogo,
             mover_modelos_whisper,
             registrar_error_log,
+            registrar_transcripcion_log,
             abrir_carpeta_logs,
             obtener_ruta_carpeta_logs
         ])

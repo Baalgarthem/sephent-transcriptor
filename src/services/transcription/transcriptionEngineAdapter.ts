@@ -133,6 +133,10 @@ export class TranscriptionEngineAdapter implements ITranscriptionEngine {
       status: resultadoAcustico.status,
       errorMotivo: resultadoAcustico.errorMotivo,
       logPath: resultadoAcustico.logPath,
+      horaInicio: resultadoAcustico.horaInicio,
+      horaFin: resultadoAcustico.horaFin,
+      duracionSegundos: resultadoAcustico.duracionSegundos,
+      duracionFormateada: resultadoAcustico.duracionFormateada,
     };
   }
 

@@ -311,6 +311,15 @@ export const TranscriptionHistorySection: React.FC<TranscriptionHistorySectionPr
                   </div>
                   <div style={{ fontSize: '0.75rem', color: THEME_TOKENS.colors.textSecondary, marginTop: '0.3rem' }}>
                     Modelo: <strong>{item.modelUsed}</strong> &middot; Idioma: <strong>{item.language}</strong> &middot; Fecha: {item.date}
+                    {item.horaInicio && item.horaFin && (
+                      <> &middot; Inicio: <strong>{item.horaInicio}</strong> &middot; Fin: <strong>{item.horaFin}</strong></>
+                    )}
+                    {item.duracionFormateada && (
+                      <> &middot; Tardó: <strong>{item.duracionFormateada}</strong></>
+                    )}
+                    {item.rawSegments && item.rawSegments.length > 0 && (
+                      <> &middot; <strong>{item.rawSegments.length}</strong> fragmentos</>
+                    )}
                   </div>
                   <div
                     style={{

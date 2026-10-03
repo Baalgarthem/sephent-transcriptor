@@ -34,6 +34,10 @@ export interface TranscriptionRecord {
   readonly status?: 'completado' | 'parcial' | 'error';
   readonly errorMotivo?: string;
   readonly logPath?: string;
+  readonly horaInicio?: string;
+  readonly horaFin?: string;
+  readonly duracionSegundos?: number;
+  readonly duracionFormateada?: string;
 }
 
 export interface SelectedOutputFormats {
