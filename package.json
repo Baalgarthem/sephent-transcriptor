@@ -7,6 +7,12 @@
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
     "build": "vite build && tauri build",
+    "build:exe": "npx tsx release.ts --build-only",
+    "release": "npx tsx release.ts",
+    "deploy": "npx tsx release.ts",
+    "bump:patch": "npx tsx release.ts --patch",
+    "bump:minor": "npx tsx release.ts --minor",
+    "bump:major": "npx tsx release.ts --major",
     "test": "npx tsx tests/modelManager.test.ts && npx tsx tests/transcriptionService.test.ts && npx tsx tests/transcriptionDatabase.test.ts && npx tsx tests/userSettings.test.ts && npx tsx tests/reviewer.test.ts && npx tsx tests/transcriptionGroups.test.ts && npx tsx tests/transcriptionIntegrity.test.ts && npx tsx tests/audioTranscriptionEngine.test.ts && npx tsx tests/silentExecutionAndPlatform.test.ts"
   },
   "dependencies": {
